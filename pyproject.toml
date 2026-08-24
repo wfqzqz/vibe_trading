@@ -248,7 +248,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["agent/tests"]
+testpaths = ["agent/tests", "qmt_bridge/tests"]
 pythonpath = ["agent"]
 markers = [
     "unit: Unit tests (fast, no network)",
