@@ -142,7 +142,12 @@ FALLBACK_CHAINS: dict[str, list[str]] = {
     # miniqmt leads the A-share chain: it is the authoritative source (区间/
     # 复权/停牌/涨跌停元数据全), but reports unavailable when the bridge/cache
     # are unreachable, so the chain then walks the free sources (DORA-124 §3.2).
-    "a_share":   ["miniqmt", "tencent", "mootdx", "eastmoney", "baostock", "akshare", "tushare", "local"],
+    # Daily free chain order is fixed by DORA-136 条件 2 (P0-2): baostock (前复权
+    # 内置) is the daily main chain *ahead of* tencent (无复权、仅作实时/无复权兜底),
+    # so a daily request never serves tencent's unadjusted raw price over
+    # baostock's qfq series. Minute requests skip the daily-only baostock/tencent
+    # via the interval filter in ``resolve_loader`` and land on mootdx/eastmoney.
+    "a_share":   ["miniqmt", "baostock", "tencent", "mootdx", "eastmoney", "akshare", "tushare", "local"],
     "us_equity": ["yahoo", "stooq", "sina", "eastmoney", "yfinance", "tiingo", "fmp", "finnhub", "alphavantage", "longbridge", "akshare", "local"],
     # HK: tencent leads (no observed IP ban); akshare (Eastmoney-backed)
     # precedes the Yahoo-SDK family, which is blocked from mainland IPs;
@@ -166,14 +171,75 @@ FALLBACK_CHAINS: dict[str, list[str]] = {
 }
 
 
-def resolve_loader(market: str) -> Any:
+# ---------------------------------------------------------------------------
+# Interval-aware resolution
+# ---------------------------------------------------------------------------
+
+# Project bar intervals (keep in sync with ``backtest.runner._VALID_INTERVALS``;
+# lowercase ``m`` = minute, uppercase ``M`` = month by project convention).
+# A loader that does not declare ``intervals`` is treated as supporting every
+# interval, so only loaders that *opt in* to a declared capability set get
+# filtered by ``resolve_loader``.
+_PROJECT_INTERVALS: frozenset[str] = frozenset(
+    {"1D", "1m", "5m", "15m", "30m", "1H", "4H"}
+)
+
+# Requested/declared token aliases → canonical project token. Loaders may declare
+# their own spelling (e.g. miniqmt's bridge tokens ``"1d"``/``"60m"``); normalizing
+# both sides lets them match the project tokens without a loader rewrite.
+_INTERVAL_ALIASES: dict[str, str] = {
+    "1d": "1D", "d": "1D", "day": "1D", "daily": "1D",
+    "1h": "1H", "60m": "1H",
+    "4h": "4H",
+}
+
+
+def _normalize_interval(interval: Any) -> str | None:
+    """Canonicalize an interval token; ``None`` when it has no project form.
+
+    Unknown/empty tokens are returned as-is (or ``None``) so callers can decide
+    whether to filter on them; the canonical project tokens pass through
+    unchanged.
+    """
+    token = str(interval).strip()
+    if not token:
+        return None
+    return _INTERVAL_ALIASES.get(token, token)
+
+
+def _supports_interval(loader_cls: Type[Any], interval: Any) -> bool:
+    """Return whether *loader_cls* declares support for *interval*.
+
+    A loader without an ``intervals`` declaration (or with an empty set) is
+    treated as supporting every interval — the historical behavior. Only an
+    explicit capability set filters the chain. The requested token and each
+    declared token are canonicalized so spelling variants (``1d``/``60m``) match
+    the project tokens (``1D``/``1H``). A requested token outside the project's
+    bar intervals is not filtered (the loader's own ``fetch()`` rejects it as it
+    always has).
+    """
+    declared = getattr(loader_cls, "intervals", None)
+    if not declared:
+        return True
+    requested = _normalize_interval(interval)
+    if requested is None or requested not in _PROJECT_INTERVALS:
+        return True
+    return requested in {_normalize_interval(token) for token in declared}
+
+
+def resolve_loader(market: str, interval: str | None = None) -> Any:
     """Return the first *available* loader instance for *market*.
 
     Walks the fallback chain and returns the first loader whose
-    ``is_available()`` returns ``True``.
+    ``is_available()`` returns ``True``. When *interval* is given, loaders that
+    declare an ``intervals`` capability set not containing it are skipped first
+    (so a minute request no longer lands on a daily-only source that would
+    return empty), then ``is_available()`` selects the first viable candidate.
 
     Args:
         market: Market type key (e.g. ``"a_share"``, ``"crypto"``).
+        interval: Optional bar interval (e.g. ``"1D"``, ``"1H"``). When omitted,
+            no interval filtering is applied (backward-compatible resolution).
 
     Returns:
         A loader instance.
@@ -187,19 +253,27 @@ def resolve_loader(market: str) -> Any:
     for name in chain:
         if name not in LOADER_REGISTRY:
             continue
+        loader_cls = LOADER_REGISTRY[name]
+        if interval is not None and not _supports_interval(loader_cls, interval):
+            logger.debug(
+                "skipping %s for %s: does not support interval %s",
+                name, market, interval,
+            )
+            continue
         tried.append(name)
         # Issue #50 — some loaders (e.g. Tushare) call into the SDK during
         # __init__ and raise on missing credentials. Treat that the same as
         # is_available()=False so the fallback chain keeps walking.
         try:
-            loader = LOADER_REGISTRY[name]()
+            loader = loader_cls()
         except Exception as exc:
             logger.debug("loader %s failed to construct: %s", name, exc)
             continue
         if loader.is_available():
             return loader
+    interval_note = f" for interval '{interval}'" if interval is not None else ""
     raise NoAvailableSourceError(
-        f"No available data source for market '{market}'. "
+        f"No available data source for market '{market}'{interval_note}. "
         f"Tried: {tried or chain}. Check network and API token config."
     )
 

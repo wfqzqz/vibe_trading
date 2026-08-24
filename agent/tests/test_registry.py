@@ -90,6 +90,65 @@ class _FakeLocalLoader:
         return {}
 
 
+class _FakeDailyOnlyLoader:
+    """Mimics tencent/baostock: available, but serves daily bars only."""
+
+    name = "fake_daily_only"
+    markets = {"a_share"}
+    intervals = {"1D"}
+    requires_auth = False
+
+    def is_available(self) -> bool:
+        return True
+
+    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+        return {}
+
+
+class _FakeMinuteCapableLoader:
+    """Mimics mootdx/eastmoney: serves daily and intraday bars."""
+
+    name = "fake_minute"
+    markets = {"a_share"}
+    intervals = {"1D", "1m", "5m", "15m", "30m", "1H"}
+    requires_auth = False
+
+    def is_available(self) -> bool:
+        return True
+
+    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+        return {}
+
+
+class _FakeUndeclaredLoader:
+    """Mimics a legacy loader with no ``intervals`` declaration."""
+
+    name = "fake_undeclared"
+    markets = {"a_share"}
+    requires_auth = False
+
+    def is_available(self) -> bool:
+        return True
+
+    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+        return {}
+
+
+class _FakeFourHourLoader:
+    """Mimics ``local``: supports every project interval including ``4H``."""
+
+    name = "fake_4h"
+    markets = {"a_share"}
+    intervals = {"1D", "1m", "5m", "15m", "30m", "1H", "4H"}
+    requires_auth = False
+
+    def is_available(self) -> bool:
+        return True
+
+    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # @register decorator
 # ---------------------------------------------------------------------------
@@ -160,9 +219,10 @@ class TestFallbackChains:
         with key-gated REST fallbacks, in the exact reviewed order."""
         # miniqmt heads the A-share chain: the authoritative bridge source, but
         # it reports unavailable when the bridge/cache are unreachable, so the
-        # chain then walks the free sources (DORA-124 §3.2).
+        # chain then walks the free sources (DORA-124 §3.2). Daily free chain is
+        # fixed by DORA-136 条件 2: baostock (前复权) ahead of tencent (无复权兜底).
         assert FALLBACK_CHAINS["a_share"] == [
-            "miniqmt", "tencent", "mootdx", "eastmoney", "baostock", "akshare", "tushare", "local",
+            "miniqmt", "baostock", "tencent", "mootdx", "eastmoney", "akshare", "tushare", "local",
         ]
         assert FALLBACK_CHAINS["us_equity"] == [
             "yahoo", "stooq", "sina", "eastmoney", "yfinance", "tiingo", "fmp",
@@ -265,6 +325,86 @@ class TestResolveLoader:
         with patch.dict(LOADER_REGISTRY, {}, clear=True):
             with pytest.raises(NoAvailableSourceError):
                 resolve_loader("martian_stocks")
+
+    def test_minute_interval_skips_daily_only_source(self) -> None:
+        """A minute request must skip a daily-only source that would return empty."""
+        with patch.dict(LOADER_REGISTRY, {
+            "fake_daily_only": _FakeDailyOnlyLoader,
+            "fake_minute": _FakeMinuteCapableLoader,
+        }, clear=True):
+            with patch.dict(FALLBACK_CHAINS, {
+                "a_share": ["fake_daily_only", "fake_minute"],
+            }):
+                loader = resolve_loader("a_share", interval="1H")
+                assert loader.name == "fake_minute"
+
+    def test_daily_interval_uses_daily_only_source(self) -> None:
+        """A daily request may still select the first available daily-only source."""
+        with patch.dict(LOADER_REGISTRY, {
+            "fake_daily_only": _FakeDailyOnlyLoader,
+            "fake_minute": _FakeMinuteCapableLoader,
+        }, clear=True):
+            with patch.dict(FALLBACK_CHAINS, {
+                "a_share": ["fake_daily_only", "fake_minute"],
+            }):
+                loader = resolve_loader("a_share", interval="1D")
+                assert loader.name == "fake_daily_only"
+
+    def test_undeclared_intervals_passes_through(self) -> None:
+        """A loader without an ``intervals`` declaration is never interval-filtered."""
+        with patch.dict(LOADER_REGISTRY, {
+            "fake_undeclared": _FakeUndeclaredLoader,
+        }, clear=True):
+            with patch.dict(FALLBACK_CHAINS, {
+                "a_share": ["fake_undeclared"],
+            }):
+                loader = resolve_loader("a_share", interval="1H")
+                assert loader.name == "fake_undeclared"
+
+    def test_interval_filter_exhausts_chain_raises(self) -> None:
+        """When every candidate is filtered out by interval, resolution fails loudly."""
+        with patch.dict(LOADER_REGISTRY, {
+            "fake_daily_only": _FakeDailyOnlyLoader,
+        }, clear=True):
+            with patch.dict(FALLBACK_CHAINS, {
+                "a_share": ["fake_daily_only"],
+            }):
+                with pytest.raises(NoAvailableSourceError):
+                    resolve_loader("a_share", interval="1H")
+
+    def test_interval_alias_normalization(self) -> None:
+        """Spelling variants (``1d``/``60m``) match canonical project tokens."""
+
+        class _BridgeSpellingLoader:
+            name = "fake_bridge"
+            markets = {"a_share"}
+            intervals = {"1d", "60m"}  # miniqmt bridge spelling
+            requires_auth = False
+
+            def is_available(self) -> bool:
+                return True
+
+            def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+                return {}
+
+        with patch.dict(LOADER_REGISTRY, {"fake_bridge": _BridgeSpellingLoader}, clear=True):
+            with patch.dict(FALLBACK_CHAINS, {"a_share": ["fake_bridge"]}):
+                assert resolve_loader("a_share", interval="1D").name == "fake_bridge"
+                assert resolve_loader("a_share", interval="1H").name == "fake_bridge"
+                with pytest.raises(NoAvailableSourceError):
+                    resolve_loader("a_share", interval="4H")
+
+    def test_four_hour_only_reachable_via_local(self) -> None:
+        """``4H`` has no free A-share source; only a loader declaring it stays in chain."""
+        with patch.dict(LOADER_REGISTRY, {
+            "fake_minute": _FakeMinuteCapableLoader,
+            "fake_4h": _FakeFourHourLoader,
+        }, clear=True):
+            with patch.dict(FALLBACK_CHAINS, {
+                "a_share": ["fake_minute", "fake_4h"],
+            }):
+                loader = resolve_loader("a_share", interval="4H")
+                assert loader.name == "fake_4h"
 
 
 # ---------------------------------------------------------------------------

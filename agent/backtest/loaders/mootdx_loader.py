@@ -74,6 +74,9 @@ class DataLoader:
     # audit environment; the cross-source consistency test pins this at
     # runtime where TDX access exists.
     volume_units = {"a_share": "lots"}
+    # Intraday + daily via TDX (``_INTRADAY_FREQ`` / ``_DAILY_FREQ``); the minute
+    # fallback for A-share requests that daily-only sources cannot serve.
+    intervals = {"1D", "1m", "5m", "15m", "30m", "1H"}
     requires_auth = False
 
     def __init__(self) -> None:

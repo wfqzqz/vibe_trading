@@ -122,6 +122,9 @@ class DataLoader:
     # Tushare daily() documents vol in board lots (HKUDS/Vibe-Trading#1062).
     # hk_equity (hk_daily) stays undeclared until empirically verified.
     volume_units = {"a_share": "lots"}
+    # Daily + intraday (1m/5m/15m/30m/1H via stk_mins, points >= 2000); token-gated
+    # so it never blocks the free chain (``is_available()`` is False without a token).
+    intervals = {"1D", "1m", "5m", "15m", "30m", "1H"}
     requires_auth = True
 
     def is_available(self) -> bool:

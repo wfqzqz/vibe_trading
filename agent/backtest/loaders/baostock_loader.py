@@ -39,6 +39,9 @@ class DataLoader:
     # to board lots — the A-share canonical unit shared by tencent/eastmoney/
     # akshare/mootdx/tushare (HKUDS/Vibe-Trading#1062).
     volume_units = {"a_share": "lots"}
+    # Daily-only source (query_history_k_data_plus frequency="d"); the daily
+    # main free chain with built-in 前复权 (DORA-136 条件 2).
+    intervals = {"1D"}
     requires_auth = False
 
     def is_available(self) -> bool:

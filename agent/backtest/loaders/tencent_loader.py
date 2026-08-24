@@ -58,6 +58,10 @@ class DataLoader:
     # reports single shares. Empirically verified 2026-08-11 against
     # 600519.SH (55,128 lots) and 00700.HK (31,100,240 shares).
     volume_units = {"a_share": "lots", "hk_equity": "shares"}
+    # Daily-only source (the fqkline endpoint has no minute surface); declaring
+    # this keeps a minute request from landing here and returning empty
+    # (DORA-124 §3.3 / DORA-136 条件 2).
+    intervals = {"1D"}
     requires_auth = False
 
     def is_available(self) -> bool:

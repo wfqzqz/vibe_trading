@@ -60,6 +60,9 @@ class DataLoader:
     # 00700.HK ratio 1.00 vs tencent/yfinance). us_equity stays undeclared
     # until empirically verified.
     volume_units = {"a_share": "lots", "hk_equity": "shares"}
+    # Intraday + daily via ``eastmoney_client.KLT_BY_INTERVAL``; a minute
+    # fallback for A-share requests that daily-only sources cannot serve.
+    intervals = {"1D", "1m", "5m", "15m", "30m", "1H"}
     requires_auth = False
 
     def is_available(self) -> bool:

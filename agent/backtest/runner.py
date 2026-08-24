@@ -1395,7 +1395,7 @@ def _fetch_auto(codes: List[str], config: dict, interval: str = "1D") -> dict:
 
     for market, market_codes in market_groups.items():
         try:
-            loader = resolve_loader(market)
+            loader = resolve_loader(market, interval=interval)
         except NoAvailableSourceError as exc:
             # Fallback: try legacy source mapping
             legacy_src = _MARKET_TO_SOURCE.get(market, "tushare")

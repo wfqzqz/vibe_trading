@@ -222,6 +222,9 @@ class DataLoader:
 
     name = "local"
     markets = {"us_equity", "a_share", "hk_equity", "crypto", "futures", "forex", "macro", "fund"}
+    # Local files can hold any granularity; ``_resample_to_interval`` honors every
+    # project bar interval (coarser downsamples, finer returns source bars).
+    intervals = {"1D", "1m", "5m", "15m", "30m", "1H", "4H"}
     requires_auth = False
 
     def __init__(self) -> None:

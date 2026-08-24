@@ -82,6 +82,9 @@ class DataLoader:
     # own documentation states shares for this interface — the docs disagree
     # with the actual behavior. Other markets stay undeclared.
     volume_units = {"a_share": "lots"}
+    # Daily-only across every market this loader serves (stock_zh_a_hist et al.
+    # expose daily/weekly/monthly, none of which is a project minute bar).
+    intervals = {"1D"}
     requires_auth = False
 
     def is_available(self) -> bool:

@@ -258,7 +258,7 @@ def test_fetch_auto_restores_original_crypto_symbol(
             assert codes == ["BTC-USDT"]
             return {"BTC-USDT": frame}
 
-    monkeypatch.setattr(runner, "resolve_loader", lambda market: OkxLoader())
+    monkeypatch.setattr(runner, "resolve_loader", lambda market, interval=None: OkxLoader())
 
     result = runner._fetch_auto(
         ["BTC/USDT"],
@@ -296,7 +296,7 @@ def test_fetch_auto_falls_back_only_for_missing_symbols(
             calls.append((self.name, list(codes)))
             return {code: frame for code in codes}
 
-    monkeypatch.setattr(runner, "resolve_loader", lambda market: PrimaryLoader())
+    monkeypatch.setattr(runner, "resolve_loader", lambda market, interval=None: PrimaryLoader())
     monkeypatch.setitem(runner.FALLBACK_CHAINS, "us_equity", ["primary", "backup"])
     monkeypatch.setitem(runner.LOADER_REGISTRY, "backup", BackupLoader)
 
@@ -373,7 +373,7 @@ def test_fetch_stops_when_fallbacks_leave_symbols_missing(
             return {"AAPL.US": frame}
 
     config = {"start_date": "2026-01-01", "end_date": "2026-01-02"}
-    monkeypatch.setattr(runner, "resolve_loader", lambda market: PartialLoader())
+    monkeypatch.setattr(runner, "resolve_loader", lambda market, interval=None: PartialLoader())
     monkeypatch.setitem(runner.FALLBACK_CHAINS, "us_equity", [])
 
     with pytest.raises(NoAvailableSourceError, match="MSFT.US"):
