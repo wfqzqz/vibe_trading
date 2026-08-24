@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Upstream sync helper for vibe_trading (fork of HKUDS/Vibe-Trading).
+#
+# DORA-124 §六 upstream-sync strategy. See UPSTREAM-SYNC.md for the policy
+# this script automates. Every operation is idempotent and safe to re-run;
+# nothing here pushes to the upstream remote (upstream/main is tracking-only)
+# or force-pushes anywhere.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+UPSTREAM_URL="https://github.com/HKUDS/Vibe-Trading.git"
+FORK_POINT="67e562a2f85080bcd5416f751061acba1885e57c" # v0.1.14
+UPSTREAM_BRANCH="upstream/main"
+
+usage() {
+  cat <<USAGE
+Usage: scripts/upstream-sync <command> [args]
+
+Commands:
+  setup                 Add/fetch upstream remote and tracking branch (idempotent)
+  check                 Report drift: commits behind, changed files, conflict surface
+  status                Alias for check
+  sync [YYYYMM]         Create sync/upstream-YYYYMM from origin/main and merge upstream/main
+  regen-locks           Regenerate the three uv pip-compile lock files
+  help                  Show this help
+
+Environment:
+  UPSTREAM_URL          Upstream remote URL (default HKUDS/Vibe-Trading)
+  FORK_POINT            Fork baseline commit (default v0.1.14 = $FORK_POINT)
+USAGE
+}
+
+have_upstream() {
+  git remote get-url upstream >/dev/null 2>&1
+}
+
+cmd_setup() {
+  if ! have_upstream; then
+    git remote add upstream "$UPSTREAM_URL"
+    printf "added remote upstream -> %s\n" "$UPSTREAM_URL"
+  else
+    printf "remote upstream already present (%s)\n" "$(git remote get-url upstream)"
+  fi
+  git fetch upstream '+refs/heads/*:refs/remotes/upstream/*' '+refs/tags/*:refs/tags/upstream/*'
+  # Local tracking branch for upstream main (distinct from our main).
+  git branch -f upstream/main "refs/remotes/$UPSTREAM_BRANCH" >/dev/null 2>&1 || \
+    git update-ref "refs/heads/upstream/main" "refs/remotes/$UPSTREAM_BRANCH"
+  printf "tracking branch %s -> %s\n" "$UPSTREAM_BRANCH" "$(git rev-parse --short "$UPSTREAM_BRANCH")"
+}
+
+# drift_report <ours> <theirs>  — print metrics to stdout and return 0.
+drift_report() {
+  local ours="$1" theirs="$2"
+  local base
+  base="$(git merge-base "$ours" "$theirs")"
+
+  printf "fork point:   %s\n" "$FORK_POINT"
+  printf "merge base:   %s\n" "$(git rev-parse --short "$base")"
+  printf "ours (main):  %s\n" "$(git rev-parse --short "$ours")"
+  printf "theirs (up):  %s\n" "$(git rev-parse --short "$theirs")"
+  printf "commits behind upstream: %s\n" "$(git rev-list --count "$ours..$theirs")"
+  printf "commits ahead (ours-only): %s\n" "$(git rev-list --count "$theirs..$ours")"
+  printf "upstream changed files: %s\n" "$(git diff --name-only "$base" "$theirs" | wc -l | tr -d ' ')"
+
+  # Conflict surface: files changed on BOTH sides since the fork point.
+  local conflict_risk
+  conflict_risk="$(comm -12 \
+    <(git diff --name-only "$base" "$ours" | sort) \
+    <(git diff --name-only "$base" "$theirs" | sort))"
+  if [[ -n "$conflict_risk" ]]; then
+    printf "\nconflict surface (changed on both sides):\n%s\n" "$conflict_risk"
+  else
+    printf "\nconflict surface (changed on both sides): (none)\n"
+  fi
+
+  # Actual merge conflicts, via merge-tree when available (git >= 2.40).
+  local mt
+  if mt="$(git merge-tree --write-tree --name-only "$ours" "$theirs" 2>/dev/null)"; then
+    local conflicts
+    conflicts="$(printf '%s\n' "$mt" | tail -n +2)"
+    if [[ -n "$conflicts" ]]; then
+      printf "\nmerge-tree conflicts:\n%s\n" "$conflicts"
+    else
+      printf "\nmerge-tree conflicts: (none)\n"
+    fi
+  else
+    printf "\nmerge-tree conflicts: (git too old to preview; resolve at merge time)\n"
+  fi
+}
+
+cmd_check() {
+  cmd_setup >/dev/null
+  echo "== upstream drift: origin/main vs $UPSTREAM_BRANCH =="
+  drift_report "origin/main" "$UPSTREAM_BRANCH"
+}
+
+cmd_sync() {
+  local yyyymm="${1:-$(date +%Y%m)}"
+  local branch="sync/upstream-${yyyymm}"
+
+  cmd_setup
+
+  if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    printf "branch %s already exists; switching to it\n" "$branch"
+    git switch "$branch"
+  else
+    git switch -c "$branch" origin/main
+    printf "created %s from origin/main (%s)\n" "$branch" "$(git rev-parse --short origin/main)"
+  fi
+
+  echo "== pre-merge drift =="
+  drift_report "origin/main" "$UPSTREAM_BRANCH"
+
+  local upstream_head
+  upstream_head="$(git rev-parse --short "$UPSTREAM_BRANCH")"
+  echo ""
+  echo "== merging $UPSTREAM_BRANCH ($upstream_head) into $branch =="
+  if ! git merge --no-ff "$UPSTREAM_BRANCH" \
+       -m "sync(upstream): merge HKUDS/Vibe-Trading $upstream_head ($branch)"; then
+    echo ""
+    echo "MERGE CONFLICTS — review and resolve, then commit:" >&2
+    git diff --name-only --diff-filter=U
+    echo ""
+    echo "After resolving: git add <files> && git commit"
+    echo "Then regen locks if upstream changed requirements: scripts/upstream-sync regen-locks"
+    exit 1
+  fi
+
+  echo ""
+  echo "merge clean. Next steps:"
+  echo "  1. scripts/upstream-sync regen-locks   # if upstream changed agent/requirements*.txt"
+  echo "  2. git push -u origin $branch          # open PR for architect conflict review"
+}
+
+cmd_regen_locks() {
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv not found — install it first (https://docs.astral.sh/uv/)" >&2
+    exit 2
+  fi
+  echo "== regenerating lock files (uv pip compile) =="
+  uv pip compile --universal --python-version 3.11 --generate-hashes \
+    --output-file requirements-lock.txt agent/requirements.txt
+  uv pip compile --universal --python-version 3.11 --generate-hashes \
+    --constraint requirements-lock.txt \
+    --output-file requirements-channels-lock.txt agent/requirements-channels.txt
+  uv pip compile --universal --python-version 3.11 --generate-hashes \
+    --constraint requirements-lock.txt \
+    --output-file requirements-factor-lock.txt agent/requirements-factor.txt
+  echo "done. Verify with: git status --short requirements*-lock.txt"
+}
+
+case "${1:-}" in
+  setup) cmd_setup ;;
+  check|status) cmd_check ;;
+  sync) shift; cmd_sync "${1:-}" ;;
+  regen-locks) cmd_regen_locks ;;
+  -h|--help|help|"") usage ;;
+  *) printf "unknown command: %s\n\n" "$1" >&2; usage >&2; exit 2 ;;
+esac
