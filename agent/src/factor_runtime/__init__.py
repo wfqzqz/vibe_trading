@@ -43,6 +43,11 @@ from src.factor_runtime.compute import (
     panel_to_long,
     reshape_factor_result,
 )
+from src.factor_runtime.operators import (
+    FactorOperatorError,
+    exec_context_operator_names,
+    validate_operator_surface,
+)
 from src.factor_runtime.runtime import (
     FactorRuntime,
     get_runtime,
@@ -69,6 +74,7 @@ __all__ = [
     "DOCKER_HINT",
     "EXPECTED_VERSION",
     "FactorComputeError",
+    "FactorOperatorError",
     "FactorRuntime",
     "FactorRuntimeUnavailableError",
     "FactorTranslationError",
@@ -79,6 +85,7 @@ __all__ = [
     "SnapshotValidationError",
     "compute_factor",
     "evaluate_factor",
+    "exec_context_operator_names",
     "factors_root",
     "get_runtime",
     "get_snapshot_store",
@@ -93,5 +100,6 @@ __all__ = [
     "reshape_factor_result",
     "runtime_status",
     "translate_expression",
+    "validate_operator_surface",
     "validate_snapshot_source",
 ]

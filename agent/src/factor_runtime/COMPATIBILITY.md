@@ -96,3 +96,61 @@ empirically, not just by metadata.
 - **numpy 2.x is the floor**, not a ceiling: `py-alpha-lib` requires `numpy>=2`,
   so any future numpy 1.x downgrade of the base stack would break the runtime.
   Keep the base lock at `numpy>=2`.
+
+## 5. Traceable findings for F-04 reconciliation (DORA-188 closure)
+
+DORA-188 (F-03 review P1: "按 ExecContext 实际算子面收口或上报上游") pins three
+runtime findings here so F-04 (因子对账回归, DORA-147) reconciles the same
+口径 (DORA-124 §3.4 "same-口径 comparison" contract) instead of rediscovering
+them:
+
+### 5.1 REF/HHV/LLV/HHVBARS/LLVBARS alias gap (doc-claimed, not in 0.3.0)
+
+py-alpha-lib's documentation advertises `REF` / `HHV` / `LLV` / `HHVBARS` /
+`LLVBARS` aliases; the 0.3.0 `alpha.context.ExecContext` does **not** implement
+them, so a translated `ctx.REF(...)` call only failed at compute time with a
+raw `AttributeError` (previously a generic 500). Closure behavior:
+
+| Surface | Before (F-03) | After (DORA-188) |
+| --- | --- | --- |
+| `POST /alpha/custom` (register) | translated OK → error only at compute | **400** `unsupported factor operator: ...` (`FactorOperatorError`, from `validate_operator_surface`) |
+| `compute` / `evaluate` | `AttributeError` → **500** generic | **422** `FactorComputeError` ("operator ... not supported") |
+| CLI `alpha custom compute|evaluate` | raw traceback | same readable one-line error via `_handle_exception` |
+
+Evidence: `src/factor_runtime/operators.py` (ExecContext surface introspection),
+`src/factor_runtime/translator.py` (registration-time check),
+`src/factor_runtime/compute.py` (`AttributeError` → `FactorComputeError`),
+`src/api/alpha_routes.py` (400/422 mapping),
+`agent/tests/test_factor_snapshot.py` / `agent/tests/test_factor_compute.py`
+(error-path tests: register 400 / compute+evaluate 422 / CLI readable error).
+
+### 5.2 ExecContext flat-array order (code-major, date-ascending)
+
+`alpha.context.ExecContext` consumes OHLCV as a flat `np.ndarray` of length
+`n_codes * n_dates`, ordered **code-major / date-ascending** (row `i` is
+`code_idx * n_dates + date_idx`). The adapter (`panel_to_long` /
+`reshape_factor_result` in `src/factor_runtime/compute.py`) emits rows in
+exactly that order and round-trips a dense wide panel via
+`reshape(n_codes, n_dates).T`. F-04 must compare same-layout (a long-format
+zoo trace must be re-flattened code-major before it can be diffed against a
+py-alpha-lib result).
+
+Evidence: `src/factor_runtime/compute.py` (docstring + implementation) and
+`agent/tests/test_factor_compute.py::test_panel_to_long_maps_columns_and_orders_rows`.
+
+### 5.3 MA rolling warmup 口径 difference (partial-warmup vs `min_periods=n`)
+
+`alpha.MA` (py-alpha-lib 0.3.0) defaults to **partial warmup**: during the
+first `n-1` bars it returns the mean over the observations available so far
+(window=2 smoke run → warmup `[1., 1.5]`, §3 above). The zoo pandas path
+(`ts_mean` and the inline `rolling(window=n, min_periods=n).mean()` used
+across the zoo, e.g. `src/factors/base.py`, qlib158/gtja191/alpha101 factor
+files) yields **NaN warmup** (all-NaN until `n` valid bars). py-alpha-lib's
+`FLAG_STRICTLY_CYCLE` reproduces the NaN-warmup semantics (smoke: `[nan nan
+2.]`, §3 above), but the **default is partial-warmup and differs from the zoo
+path**. F-04 must either force the strict-cycle flag or restrict the
+reconciliation to the steady-state region — do not diff the two paths' warmup
+values directly.
+
+Evidence: §3 empirical smoke output above, `src/factors/base.py::ts_mean`,
+zoo factor files (`min_periods=n` rolling calls).

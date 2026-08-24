@@ -837,6 +837,7 @@ def register_alpha_routes(
         expression; 500 (sanitised) on any other failure.
         """
         from src.factor_runtime import (
+            FactorOperatorError,
             FactorRuntimeUnavailableError,
             FactorTranslationError,
             get_runtime,
@@ -848,6 +849,13 @@ def register_alpha_routes(
             # The actionable Docker hint is a curated, path-free string — safe
             # to surface verbatim.
             raise HTTPException(status_code=503, detail=str(exc))
+        except FactorOperatorError as exc:
+            # F-03 review P1 (DORA-188): doc-claimed but unimplemented
+            # operators (REF/HHV/LLV/HHVBARS/LLVBARS in 0.3.0) → 400 with an
+            # explicit "operator not supported" message, never a 500.
+            raise HTTPException(
+                status_code=400, detail=f"unsupported factor operator: {exc}"
+            )
         except (FactorTranslationError, ValueError) as exc:
             # Translation/validation failures carry a curated message (no paths,
             # no stack frames); 400 matches the "unknown zoo"/"invalid period"
@@ -899,6 +907,11 @@ def register_alpha_routes(
             return HTTPException(status_code=404, detail={"status": "error", "error": str(exc)})
         if isinstance(exc, (SnapshotValidationError, FactorComputeError)):
             return HTTPException(status_code=422, detail=str(exc))
+        if isinstance(exc, AttributeError):
+            # A snapshot calling a doc-claimed-but-unimplemented operator
+            # (pre-DORA-188 registration) fails with AttributeError here; map
+            # it to the same 422 FactorComputeError 口径, never a generic 500.
+            return HTTPException(status_code=422, detail=f"factor compute error: {exc}")
         if isinstance(exc, ValueError):
             # Bad universe/period from the panel loader — curated message.
             return HTTPException(status_code=400, detail=str(exc))

@@ -11,11 +11,18 @@ the py-alpha-lib ``ExecContext``:
 Only this module touches the online translator. The snapshot store
 (``snapshot.py``) persists the *output*, and the loader imports it without ever
 re-translating — the offline-reproducibility contract from DORA-124 §4.3.
+
+DORA-188 (F-03 review P1): every ``ctx.OP(...)`` call in the translated body is
+validated against the installed ``ExecContext``'s real operator surface
+(:func:`validate_operator_surface`), so doc-claimed-but-unimplemented aliases
+(``REF`` / ``HHV`` / ``LLV`` / ``HHVBARS`` / ``LLVBARS`` in 0.3.0) are rejected
+at registration instead of failing at compute with a raw ``AttributeError``.
 """
 
 from __future__ import annotations
 
 from src.factor_runtime.availability import require_available
+from src.factor_runtime.operators import validate_operator_surface
 
 #: Function name + parameter contract shared with ``snapshot.py``.
 FUNCTION_NAME = "compute"
@@ -45,6 +52,8 @@ def translate_expression(expression: str, *, func_name: str = FUNCTION_NAME) -> 
     Raises:
         FactorTranslationError: blank input, or the expression is not valid
             ``alpha.lang`` (lark parse/lex failure).
+        FactorOperatorError: the translated body calls an operator the
+            installed ``ExecContext`` does not implement (DORA-188).
     """
     if not expression or not expression.strip():
         raise FactorTranslationError("factor expression must not be empty")
@@ -70,4 +79,9 @@ def translate_expression(expression: str, *, func_name: str = FUNCTION_NAME) -> 
 
     if not body or not body.strip():
         raise FactorTranslationError("alpha.lang produced an empty translation")
+
+    # F-03 review P1 (DORA-188): the doc-claimed REF/HHV/LLV/HHVBARS/LLVBARS
+    # aliases are not implemented on the 0.3.0 ExecContext — reject them at
+    # registration with a clear 400, not a compute-time raw AttributeError.
+    validate_operator_surface(body, alpha)
     return body
