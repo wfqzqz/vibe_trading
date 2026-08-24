@@ -7,6 +7,9 @@ Provides five weighting schemes:
 - max_diversification: maximize diversification ratio
 - turnover_aware: mean-variance utility with an L1 turnover penalty
 
+Plus one signal-level exposure layer:
+- kelly: per-symbol Kelly fraction scaling on the target weights
+
 Select via ``optimizer`` in ``config.json``; default is off (1/N).
 Add a new optimizer by dropping a module here that exposes ``optimize()``.
 """
