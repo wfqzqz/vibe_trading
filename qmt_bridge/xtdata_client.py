@@ -30,6 +30,14 @@ __all__ = [
 #: dividend_type token per bridge adjustment 口径.
 _ADJUST_TO_DIVIDEND_TYPE = {"qfq": "front", "hfq": "back", "none": "none"}
 
+#: A-share board-lot size: 1 lot = 100 shares. ``xtdata`` reports volume in
+#: single shares (股), while the bridge's provenance — and the whole A-share
+#: loader convention (backtest/loaders/base.py, HKUDS/Vibe-Trading#1062) — uses
+#: board lots. Normalizing shares → lots at this ingestion boundary keeps the
+#: cache and HTTP bars on the same "lots" unit so D-04 门禁 1 sees no 100x jump.
+#: (DORA-156 条件 1; the ÷100 factor is re-verified empirically by D-05.)
+_VOLUME_SHARES_PER_LOT = 100.0
+
 
 class XtdataUnavailableError(Exception):
     """Raised when ``xtquant.xtdata`` cannot be imported or the feed is down."""
@@ -233,6 +241,12 @@ def _coerce_market_data_frame(data: dict[str, Any], symbol: str) -> pd.DataFrame
     for col in ("open", "high", "low", "close", "volume", "amount"):
         if col in frame.columns:
             frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    # xtdata reports volume in single shares (股); normalize to board lots
+    # (1 lot = 100 shares) to match the bridge's provenance unit and every other
+    # A-share source (see module docstring / DORA-156 条件 1). ``amount`` is a
+    # money value (元) and is left untouched.
+    if "volume" in frame.columns:
+        frame["volume"] = frame["volume"] / _VOLUME_SHARES_PER_LOT
     return frame.sort_index()
 
 

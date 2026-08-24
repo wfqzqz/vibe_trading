@@ -247,7 +247,9 @@ _LOADER_CACHE_TRUE_VALUES = {"1", "true", "yes", "on"}
 # simply never matched (old files become unreachable garbage, safe to delete).
 # v4: baostock volume normalized from shares to lots (#1062) — entries cached
 # under the pre-normalization unit must never be served again.
-_LOADER_CACHE_VERSION = 4
+# v5: miniqmt (QMT Bridge) volume normalized from shares to lots (DORA-156
+# 条件 1) — any pre-normalization miniqmt cache must never be served.
+_LOADER_CACHE_VERSION = 5
 
 
 def loader_cache_enabled() -> bool:

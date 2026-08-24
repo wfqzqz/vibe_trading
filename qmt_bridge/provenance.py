@@ -21,7 +21,9 @@ __all__ = ["build_provenance", "SOURCE_NAME"]
 SOURCE_NAME = "miniqmt"
 
 #: A-share volume is expressed in board lots (1 lot = 100 shares), matching
-#: the agent's ``volume_units`` convention.
+#: the agent's ``volume_units`` convention. ``xtdata_client`` normalizes the
+#: raw share-denominated xtdata volume to lots at ingestion, so this label is
+#: truthful (DORA-156 条件 1).
 VOLUME_UNIT = "lots"
 
 

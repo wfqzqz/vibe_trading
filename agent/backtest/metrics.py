@@ -30,7 +30,7 @@ _TRADING_DAYS = {
     # crypto
     "binance": 365,
     # A-share equity
-    "baostock": 252, "tencent": 252, "eastmoney": 252, "sina": 252,
+    "baostock": 252, "tencent": 252, "eastmoney": 252, "sina": 252, "miniqmt": 252,
     # US / international equity
     "yahoo": 252, "finnhub": 252, "alphavantage": 252, "tiingo": 252,
     "fmp": 252, "stooq": 252, "longbridge": 252,
@@ -58,7 +58,7 @@ _BARS_PER_DAY = {
             "local": 390, "qveris": 390,
             # A-share equity (4.0h session)
             "tushare": 240, "akshare": 240, "baostock": 240, "tencent": 240,
-            "eastmoney": 240, "sina": 240, "mootdx": 240, "futu": 240,
+            "eastmoney": 240, "sina": 240, "mootdx": 240, "futu": 240, "miniqmt": 240,
             # crypto (24h)
             "okx": 1440, "ccxt": 1440, "binance": 1440,
             # forex/CFD (24h intraday)
@@ -72,7 +72,7 @@ _BARS_PER_DAY = {
             "tiingo": 78,  "fmp": 78,  "stooq": 78,  "longbridge": 78,
             "local": 78, "qveris": 78,
             "tushare": 48,  "akshare": 48,  "baostock": 48,  "tencent": 48,
-            "eastmoney": 48,  "sina": 48,  "mootdx": 48,  "futu": 48,
+            "eastmoney": 48,  "sina": 48,  "mootdx": 48,  "futu": 48,  "miniqmt": 48,
             "okx": 288,  "ccxt": 288,  "binance": 288,
             "mt5": 288, "tickerall": 288,
             "india_broker": 75,
@@ -82,7 +82,7 @@ _BARS_PER_DAY = {
             "tiingo": 26,  "fmp": 26,  "stooq": 26,  "longbridge": 26,
             "local": 26, "qveris": 26,
             "tushare": 16,  "akshare": 16,  "baostock": 16,  "tencent": 16,
-            "eastmoney": 16,  "sina": 16,  "mootdx": 16,  "futu": 16,
+            "eastmoney": 16,  "sina": 16,  "mootdx": 16,  "futu": 16,  "miniqmt": 16,
             "okx": 96,   "ccxt": 96,   "binance": 96,
             "mt5": 96, "tickerall": 96,
             "india_broker": 25,
@@ -92,7 +92,7 @@ _BARS_PER_DAY = {
             "tiingo": 13,  "fmp": 13,  "stooq": 13,  "longbridge": 13,
             "local": 13, "qveris": 13,
             "tushare": 8,   "akshare": 8,   "baostock": 8,   "tencent": 8,
-            "eastmoney": 8,   "sina": 8,   "mootdx": 8,   "futu": 8,
+            "eastmoney": 8,   "sina": 8,   "mootdx": 8,   "futu": 8,   "miniqmt": 8,
             "okx": 48,   "ccxt": 48,   "binance": 48,
             "mt5": 48, "tickerall": 48,
             "india_broker": 13,
@@ -102,7 +102,7 @@ _BARS_PER_DAY = {
             "tiingo": 7,   "fmp": 7,   "stooq": 7,   "longbridge": 7,
             "local": 7, "qveris": 7,
             "tushare": 4,   "akshare": 4,   "baostock": 4,   "tencent": 4,
-            "eastmoney": 4,   "sina": 4,   "mootdx": 4,   "futu": 4,
+            "eastmoney": 4,   "sina": 4,   "mootdx": 4,   "futu": 4,   "miniqmt": 4,
             "okx": 24,   "ccxt": 24,   "binance": 24,
             "mt5": 24, "tickerall": 24,
             "india_broker": 7,
@@ -112,7 +112,7 @@ _BARS_PER_DAY = {
             "tiingo": 2,   "fmp": 2,   "stooq": 2,   "longbridge": 2,
             "local": 2, "qveris": 2,
             "tushare": 1,   "akshare": 1,   "baostock": 1,   "tencent": 1,
-            "eastmoney": 1,   "sina": 1,   "mootdx": 1,   "futu": 1,
+            "eastmoney": 1,   "sina": 1,   "mootdx": 1,   "futu": 1,   "miniqmt": 1,
             "okx": 6,    "ccxt": 6,    "binance": 6,
             "mt5": 6, "tickerall": 6,
             "india_broker": 2,
@@ -122,7 +122,7 @@ _BARS_PER_DAY = {
             "tiingo": 1,   "fmp": 1,   "stooq": 1,   "longbridge": 1,
             "local": 1, "qveris": 1,
             "tushare": 1,   "akshare": 1,   "baostock": 1,   "tencent": 1,
-            "eastmoney": 1,   "sina": 1,   "mootdx": 1,   "futu": 1,
+            "eastmoney": 1,   "sina": 1,   "mootdx": 1,   "futu": 1,   "miniqmt": 1,
             "okx": 1,    "ccxt": 1,    "binance": 1,
             "mt5": 1, "tickerall": 1,
             "india_broker": 1,
