@@ -7,9 +7,10 @@ installed:
   zoo presets stay untouched, and the new-factor entry points raise
   ``FactorRuntimeUnavailableError`` carrying the Docker hint;
 * **available** (container): a fake ``alpha`` module in ``sys.modules`` makes
-  the probe pass, and the entry points then raise
-  ``FactorRuntimeNotImplementedError`` (F-02/F-03 seam) — proving the guard let
-  them through.
+  the probe pass, and the compute/evaluate entry points then raise
+  ``FactorRuntimeNotImplementedError`` (F-03 seam) — proving the guard let
+  them through. (``register`` is implemented by F-02 and covered in
+  ``test_factor_snapshot.py``.)
 
 No network; deterministic. The probe cache is reset per test.
 """
@@ -138,15 +139,16 @@ def test_status_reports_available_and_version(monkeypatch: pytest.MonkeyPatch) -
     assert status["hint"] is None
 
 
-def test_entry_points_raise_not_implemented_when_available(
+def test_compute_evaluate_raise_not_implemented_when_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Proves the guard passes in a healthy container, then hits the F-02/F-03 seam."""
+    """Proves the guard passes in a healthy container, then hits the F-03 seam.
+
+    ``register`` is implemented by F-02 (see ``test_factor_snapshot.py``) and
+    therefore no longer raises here.
+    """
     monkeypatch.setitem(sys.modules, "alpha", _fake_alpha())
     runtime = get_runtime()
-    with pytest.raises(FactorRuntimeNotImplementedError) as exc_info:
-        runtime.register("close/ref(close,1)-1")
-    assert "F-02" in str(exc_info.value)
     with pytest.raises(FactorRuntimeNotImplementedError) as exc_info:
         runtime.compute("factor_x", {})
     assert "F-03" in str(exc_info.value)

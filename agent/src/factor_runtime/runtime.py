@@ -1,16 +1,15 @@
 """New-factor entry points for the py-alpha-lib factor runtime.
 
-F-01 delivers the runtime *shell*: the availability guard plus the graceful
-degradation contract. The translation/snapshot engine (F-02) and the
-compute/evaluate bodies (F-03) are implemented by later tasks; here the entry
-points enforce the degradation contract:
+F-01 delivered the runtime *shell* (availability guard + graceful degradation).
+F-02 implements the ``register`` body (alpha.lang translation → immutable,
+versioned snapshot). The compute/evaluate bodies (F-03) are still outstanding:
 
-* when py-alpha-lib is unavailable, ``register`` / ``compute`` / ``evaluate``
-  raise :class:`~src.factor_runtime.availability.FactorRuntimeUnavailableError`
+* when py-alpha-lib is unavailable, every entry point raises
+  :class:`~src.factor_runtime.availability.FactorRuntimeUnavailableError`
   (the "prompt Docker" degradation);
-* when it is available, they raise :class:`FactorRuntimeNotImplementedError`
-  naming the owning task, so a healthy container fails loudly rather than
-  silently returning placeholder data.
+* when it is available, ``compute`` / ``evaluate`` raise
+  :class:`FactorRuntimeNotImplementedError` naming the owning task, so a healthy
+  container fails loudly rather than silently returning placeholder data.
 
 Entry points mirror DORA-124 §4.3 (``/alpha/custom``):
     register(expression) -> {factor_id, version}    (F-02)
@@ -25,9 +24,8 @@ from typing import Any
 
 from src.factor_runtime.availability import require_available, runtime_status
 
-# Tracking references for the parts deliberately left out of F-01 scope
+# Tracking references for the parts deliberately left out of this task's scope
 # (Agent Identity: NotImplemented must carry a tracking-issue reference).
-_REGISTER_OWNER = "F-02 (factor registration / alpha.lang translation / snapshot)"
 _COMPUTE_OWNER = "F-03 (factor compute / evaluate entry points)"
 
 
@@ -38,8 +36,8 @@ class FactorRuntimeNotImplementedError(NotImplementedError):
 class FactorRuntime:
     """In-process facade over the py-alpha-lib runtime (DORA-124 module D).
 
-    Stateless shell for F-01; F-02/F-03 implement the method bodies. Obtain
-    the process-wide instance via :func:`get_runtime`.
+    ``register`` is implemented by F-02; ``compute``/``evaluate`` land with
+    F-03. Obtain the process-wide instance via :func:`get_runtime`.
     """
 
     def status(self) -> dict[str, Any]:
@@ -47,16 +45,16 @@ class FactorRuntime:
         return runtime_status()
 
     def register(self, expression: str, **kwargs: Any) -> dict[str, Any]:
-        """Register a factor expression → translated snapshot (F-02).
+        """Register a factor expression → translated, versioned snapshot (F-02).
 
-        Degrades to :class:`FactorRuntimeUnavailableError` when py-alpha-lib is
-        absent; raises :class:`FactorRuntimeNotImplementedError` otherwise.
+        Returns ``{factor_id, version, ...}``. Degrades to
+        :class:`FactorRuntimeUnavailableError` when py-alpha-lib is absent.
         """
         require_available()
-        raise FactorRuntimeNotImplementedError(
-            f"factor registration is implemented by {_REGISTER_OWNER} "
-            "(DORA-124 §五 Stage 4); F-01 only ships the runtime shell"
-        )
+        from src.factor_runtime.snapshot import get_snapshot_store
+
+        name = kwargs.get("name") or kwargs.get("factor_id")
+        return get_snapshot_store().register(expression, name=name)
 
     def compute(self, factor_id: str, panel: Any, **kwargs: Any) -> Any:
         """Compute a registered factor over a panel (F-03).
@@ -67,7 +65,7 @@ class FactorRuntime:
         require_available()
         raise FactorRuntimeNotImplementedError(
             f"factor compute is implemented by {_COMPUTE_OWNER} "
-            "(DORA-124 §五 Stage 4); F-01 only ships the runtime shell"
+            "(DORA-124 §五 Stage 4)"
         )
 
     def evaluate(self, factor_id: str, panel: Any, **kwargs: Any) -> dict[str, Any]:
@@ -79,7 +77,7 @@ class FactorRuntime:
         require_available()
         raise FactorRuntimeNotImplementedError(
             f"factor evaluate is implemented by {_COMPUTE_OWNER} "
-            "(DORA-124 §五 Stage 4); F-01 only ships the runtime shell"
+            "(DORA-124 §五 Stage 4)"
         )
 
 
