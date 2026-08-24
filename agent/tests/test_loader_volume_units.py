@@ -16,6 +16,7 @@ from backtest.loaders.akshare_loader import DataLoader as AkshareLoader
 from backtest.loaders.baostock_loader import DataLoader as BaostockLoader
 from backtest.loaders.eastmoney_loader import DataLoader as EastmoneyLoader
 from backtest.loaders.local_loader import DataLoader as LocalLoader
+from backtest.loaders.miniqmt_loader import DataLoader as MiniqmtLoader
 from backtest.loaders.mootdx_loader import DataLoader as MootdxLoader
 from backtest.loaders.stooq_loader import DataLoader as StooqLoader
 from backtest.loaders.tencent_loader import DataLoader as TencentLoader
@@ -33,6 +34,7 @@ from backtest.loaders.yfinance_loader import DataLoader as YfinanceLoader
         (EastmoneyLoader, "hk_equity", "shares"),
         (BaostockLoader, "a_share", "lots"),
         (MootdxLoader, "a_share", "lots"),
+        (MiniqmtLoader, "a_share", "lots"),
         (AkshareLoader, "a_share", "lots"),
         (TushareLoader, "a_share", "lots"),
         (YahooLoader, "us_equity", "shares"),

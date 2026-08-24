@@ -40,7 +40,8 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 #: Bump only in lockstep with ``backtest.loaders.base._LOADER_CACHE_VERSION``.
-LOADER_CACHE_VERSION = 4
+#: v5: miniqmt volume normalized from shares to lots (DORA-156 条件 1).
+LOADER_CACHE_VERSION = 5
 
 _LOADER_CACHE_ENV = "VIBE_TRADING_DATA_CACHE"
 _LOADER_CACHE_ROOT_ENV = "VIBE_TRADING_DATA_CACHE_ROOT"

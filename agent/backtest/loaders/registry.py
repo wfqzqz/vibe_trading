@@ -55,6 +55,7 @@ VALID_SOURCES: set[str] = {
     "longbridge",
     "mt5",
     "tickerall",
+    "miniqmt",
     "local",
     "auto",
 }
@@ -106,6 +107,7 @@ def _ensure_registered() -> None:
         "backtest.loaders.longbridge",
         "backtest.loaders.mt5_loader",
         "backtest.loaders.tickerall_loader",
+        "backtest.loaders.miniqmt_loader",
         "backtest.loaders.local_loader",
     ]
     import importlib
@@ -137,7 +139,10 @@ _NO_NETWORK_FALLBACK_SOURCES: frozenset[str] = frozenset({"local", "qveris", "ti
 # that must be politely throttled; Finnhub/AlphaVantage/Tiingo/FMP are key-gated
 # REST fallbacks placed deeper in the chain.
 FALLBACK_CHAINS: dict[str, list[str]] = {
-    "a_share":   ["tencent", "mootdx", "eastmoney", "baostock", "akshare", "tushare", "local"],
+    # miniqmt leads the A-share chain: it is the authoritative source (区间/
+    # 复权/停牌/涨跌停元数据全), but reports unavailable when the bridge/cache
+    # are unreachable, so the chain then walks the free sources (DORA-124 §3.2).
+    "a_share":   ["miniqmt", "tencent", "mootdx", "eastmoney", "baostock", "akshare", "tushare", "local"],
     "us_equity": ["yahoo", "stooq", "sina", "eastmoney", "yfinance", "tiingo", "fmp", "finnhub", "alphavantage", "longbridge", "akshare", "local"],
     # HK: tencent leads (no observed IP ban); akshare (Eastmoney-backed)
     # precedes the Yahoo-SDK family, which is blocked from mainland IPs;
