@@ -22,6 +22,7 @@ from src.trading.credentials import CredentialStore
 from src.trading.local_plugins import clear_plugin_cache, discover_plugins
 from src.trading.plugin_scaffold import scaffold_connector
 from src.trading.profiles import profile_by_id
+from src.trading.types import TradingProfile
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_DIR = ROOT / "agent"
@@ -222,9 +223,21 @@ def test_discovery_of_a_new_plugin_invalidates_the_cached_result(tmp_path) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_discovery_only_profile_cannot_back_a_portfolio_connection(tmp_path) -> None:
+def test_discovery_only_profile_cannot_back_a_portfolio_connection(
+    tmp_path, monkeypatch
+) -> None:
     """A tool-discovery profile cannot serve account or position reads."""
-    profile = profile_by_id("ibkr-live-official-mcp-readonly")
+    profile = TradingProfile(
+        id="discovery-only-test",
+        connector="test",
+        label="Discovery only",
+        environment="live",
+        transport="remote_mcp",
+        capabilities=("mcp.read.discovery",),
+        readonly=True,
+        config={"server": "test"},
+    )
+    monkeypatch.setattr("src.trading.connections.profile_by_id", lambda _: profile)
     assert profile.readonly is True
     assert profile.capabilities == ("mcp.read.discovery",)
     assert is_portfolio_connection_profile(profile) is False

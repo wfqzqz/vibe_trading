@@ -960,6 +960,10 @@ def _format_tool_result_preview(tool: str, status: str, preview: str) -> str:
 
 _PROPOSAL_TOOL_NAME = "propose_mandate_profiles"
 _PROPOSAL_ID_RE = re.compile(r'"proposal_id"\s*:\s*"(mp_[0-9a-f]{32})"')
+_SCHEDULED_PROPOSAL_TOOL_NAME = "scheduled_research"
+_SCHEDULED_PROPOSAL_ID_RE = re.compile(
+    r'"proposal_id"\s*:\s*"(srp_[0-9a-f]{32})"'
+)
 
 
 def _load_full_proposal(proposal_id: str) -> Optional[Dict[str, Any]]:
@@ -1016,6 +1020,21 @@ def _mandate_proposal_from_tool_result(data: Dict[str, Any]) -> Optional[Dict[st
     if not match:
         return None
     return _load_full_proposal(match.group(1))
+
+
+def _scheduled_proposal_from_tool_result(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Recover the full scheduled-research proposal from a tool preview."""
+    if data.get("tool") != _SCHEDULED_PROPOSAL_TOOL_NAME or data.get("status") != "ok":
+        return None
+    match = _SCHEDULED_PROPOSAL_ID_RE.search(str(data.get("preview") or ""))
+    if not match:
+        return None
+    try:
+        from src.scheduled_research.proposals import load_proposal
+
+        return load_proposal(match.group(1))
+    except Exception:  # noqa: BLE001 - relay must never break the turn
+        return None
 
 
 def _ensure_session_id(title: str, *, session_id: Optional[str] = None) -> str:
@@ -1116,6 +1135,8 @@ def _run_agent(
         # the tool_result still flows on to the dashboard / no-rich printers.
         if event_type == "tool_result" and proposal_sink is not None:
             proposal = _mandate_proposal_from_tool_result(data)
+            if proposal is None:
+                proposal = _scheduled_proposal_from_tool_result(data)
             if proposal is not None:
                 try:
                     proposal_sink(proposal)

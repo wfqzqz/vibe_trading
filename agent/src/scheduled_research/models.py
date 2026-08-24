@@ -189,6 +189,7 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 class DeliveryStatus(str, Enum):
@@ -209,6 +210,7 @@ class DeliveryStatus(str, Enum):
     #: expires. Without the claim, a concurrent sweep reads PENDING while the
     #: first send is still in flight and delivers the same briefing twice.
     SENDING = "sending"
+    ACCEPTED = "accepted"
     SENT = "sent"
     FAILED = "failed"
 
@@ -237,6 +239,7 @@ class DeliveryRecord:
     error: Optional[str] = None
     attempts: int = 0
     updated_at: Optional[int] = None
+    provider_message_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a plain JSON-serializable dict."""
@@ -247,6 +250,7 @@ class DeliveryRecord:
             "error": self.error,
             "attempts": self.attempts,
             "updated_at": self.updated_at,
+            "provider_message_id": self.provider_message_id,
         }
 
     @classmethod
@@ -273,7 +277,7 @@ class DeliveryRecord:
             status = DeliveryStatus(raw_status)
         except ValueError as exc:
             raise ValueError(f"unknown delivery status {raw_status!r}") from exc
-        for name in ("session_id", "key", "error"):
+        for name in ("session_id", "key", "error", "provider_message_id"):
             value = data.get(name)
             if value is not None and not isinstance(value, str):
                 raise TypeError(f"'delivery.{name}' must be a string or null")
@@ -290,6 +294,7 @@ class DeliveryRecord:
             error=data.get("error"),
             attempts=attempts,
             updated_at=updated_at,
+            provider_message_id=data.get("provider_message_id"),
         )
 
 
@@ -358,6 +363,10 @@ class ScheduledResearchJob:
     id: str
     prompt: str
     schedule: str
+    title: str = ""
+    source_type: str = "prompt"
+    playbook_slug: Optional[str] = None
+    end_at: Optional[int] = None
     next_run_at: int = field(default_factory=lambda: int(time.time() * 1000))
     status: JobStatus = JobStatus.PENDING
     created_at: int = field(default_factory=lambda: int(time.time() * 1000))
@@ -369,6 +378,8 @@ class ScheduledResearchJob:
     timezone: Optional[str] = None
     delivery_channel: Optional[str] = None
     delivery_target: Optional[str] = None
+    delivery_target_ref: Optional[str] = None
+    delivery_target_label: Optional[str] = None
     delivery: DeliveryRecord = field(default_factory=DeliveryRecord)
     last_verdict: Optional[VerdictRecord] = None
 
@@ -383,6 +394,10 @@ class ScheduledResearchJob:
             "id": self.id,
             "prompt": self.prompt,
             "schedule": self.schedule,
+            "title": self.title,
+            "source_type": self.source_type,
+            "playbook_slug": self.playbook_slug,
+            "end_at": self.end_at,
             "next_run_at": self.next_run_at,
             "status": self.status.value,
             "created_at": self.created_at,
@@ -394,6 +409,8 @@ class ScheduledResearchJob:
             "timezone": self.timezone,
             "delivery_channel": self.delivery_channel,
             "delivery_target": self.delivery_target,
+            "delivery_target_ref": self.delivery_target_ref,
+            "delivery_target_label": self.delivery_target_label,
             "delivery": self.delivery.to_dict(),
             "last_verdict": self.last_verdict.to_dict() if self.last_verdict else None,
         }
@@ -453,13 +470,29 @@ class ScheduledResearchJob:
                 raw_tz,
             )
         status = JobStatus(data["status"])
+        title = data.get("title", "")
+        source_type = data.get("source_type", "prompt")
+        playbook_slug = data.get("playbook_slug")
+        end_at = data.get("end_at")
+        if not isinstance(title, str):
+            raise TypeError("'title' must be a string")
+        if source_type not in {"prompt", "playbook"}:
+            raise ValueError("'source_type' must be 'prompt' or 'playbook'")
+        if playbook_slug is not None and not isinstance(playbook_slug, str):
+            raise TypeError("'playbook_slug' must be a string or null")
+        if end_at is not None and (isinstance(end_at, bool) or not isinstance(end_at, int)):
+            raise TypeError("'end_at' must be an integer (epoch ms) or null")
         raw_config = data.get("config")
         config: Dict[str, Any] = raw_config if isinstance(raw_config, dict) else {}
         delivery_channel = data.get("delivery_channel")
         delivery_target = data.get("delivery_target")
+        delivery_target_ref = data.get("delivery_target_ref")
+        delivery_target_label = data.get("delivery_target_label")
         for name, value in (
             ("delivery_channel", delivery_channel),
             ("delivery_target", delivery_target),
+            ("delivery_target_ref", delivery_target_ref),
+            ("delivery_target_label", delivery_target_label),
         ):
             if value is not None and not isinstance(value, str):
                 raise TypeError(f"'{name}' must be a string or null")
@@ -467,6 +500,10 @@ class ScheduledResearchJob:
             id=job_id,
             prompt=prompt,
             schedule=schedule,
+            title=title,
+            source_type=source_type,
+            playbook_slug=playbook_slug,
+            end_at=end_at,
             next_run_at=next_run_at,
             status=status,
             created_at=created_at,
@@ -478,6 +515,8 @@ class ScheduledResearchJob:
             timezone=tz,
             delivery_channel=delivery_channel,
             delivery_target=delivery_target,
+            delivery_target_ref=delivery_target_ref,
+            delivery_target_label=delivery_target_label,
             delivery=DeliveryRecord.from_dict(data.get("delivery")),
             last_verdict=_verdict_record_or_none(data.get("last_verdict"), job_id),
         )

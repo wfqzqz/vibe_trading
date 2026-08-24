@@ -1310,6 +1310,7 @@ def _call_remote(
         else MCPServerAdapter(server_name, server, interactive_oauth=False)
     )
     call_result = adapter.call_tool(remote_name, _remote_arguments(profile.connector, operation, arguments))
+    call_result = _normalize_remote_result(profile.connector, operation, call_result)
     account_number = arguments.get("account_number")
     if account_number:
         call_result = dict(call_result)
@@ -1319,6 +1320,10 @@ def _call_remote(
 
 def _remote_tool_name(connector: str, operation: str) -> str | None:
     """Map generic read operations to current remote MCP tool names."""
+    if connector == "ibkr":
+        from src.trading.connectors.ibkr.mcp import remote_tool_name
+
+        return remote_tool_name(operation)
     if connector == "robinhood":
         from src.trading.connectors.robinhood.mcp import remote_tool_name
 
@@ -1328,11 +1333,26 @@ def _remote_tool_name(connector: str, operation: str) -> str | None:
 
 def _remote_arguments(connector: str, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Normalize generic arguments for a remote MCP operation."""
+    if connector == "ibkr":
+        from src.trading.connectors.ibkr.mcp import remote_arguments
+
+        return remote_arguments(operation, arguments)
     if connector == "robinhood":
         from src.trading.connectors.robinhood.mcp import remote_arguments
 
         return remote_arguments(operation, arguments)
     return {}
+
+
+def _normalize_remote_result(
+    connector: str, operation: str, result: dict[str, Any]
+) -> dict[str, Any]:
+    """Map connector-specific MCP envelopes into shared read payloads."""
+    if connector == "ibkr":
+        from src.trading.connectors.ibkr.mcp import normalize_result
+
+        return normalize_result(operation, result)
+    return result
 
 
 def _unsupported(profile: TradingProfile, capability: str) -> dict[str, Any]:

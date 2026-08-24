@@ -10,7 +10,7 @@ import {
   type StoredAgentMessage,
 } from "@/stores/agent";
 import { useSSE } from "@/hooks/useSSE";
-import { ApiError, AUTH_REQUIRED_MESSAGE, api, isAuthRequiredError, type GoalSnapshot, type MandateProposal, type MandateCommitted, type LiveAction, type LiveHalted, type LLMSettings } from "@/lib/api";
+import { ApiError, AUTH_REQUIRED_MESSAGE, api, isAuthRequiredError, type GoalSnapshot, type MandateProposal, type MandateCommitted, type ScheduledResearchProposal, type LiveAction, type LiveHalted, type LLMSettings } from "@/lib/api";
 import {
   extractUploadedAttachments,
   prependUploadedAttachments,
@@ -25,6 +25,7 @@ import { ThinkingTimeline } from "@/components/chat/ThinkingTimeline";
 import { ConversationTimeline } from "@/components/chat/ConversationTimeline";
 import { ActivityLine } from "@/components/chat/ActivityLine";
 import { MandateProposalCard } from "@/components/chat/MandateProposalCard";
+import { ScheduledResearchProposalCard } from "@/components/chat/ScheduledResearchProposalCard";
 import { SwarmStatusCard } from "@/components/chat/SwarmStatusCard";
 import {
   Composer,
@@ -169,7 +170,12 @@ interface LiveActionItem {
   timestamp: number;
   action: LiveAction;
 }
-type LiveItem = ProposalItem | LiveActionItem;
+interface ScheduledProposalItem {
+  kind: "scheduled_proposal";
+  timestamp: number;
+  proposal: ScheduledResearchProposal;
+}
+type LiveItem = ProposalItem | ScheduledProposalItem | LiveActionItem;
 
 function isCriterionStatusMet(status: string): boolean {
   return !["", "pending", "open", "unsatisfied"].includes(status.toLowerCase());
@@ -1103,6 +1109,17 @@ export function Agent() {
         scrollToBottom();
       },
 
+      "scheduled_research.proposal": (d) => {
+        touch();
+        const proposal = d as unknown as ScheduledResearchProposal;
+        if (!proposal.proposal_id || !proposal.job) return;
+        setLiveItems((items) => [
+          ...items,
+          { kind: "scheduled_proposal", timestamp: Date.now(), proposal },
+        ]);
+        scrollToBottom();
+      },
+
       "live.halted": (d) => {
         touch();
         const halted = d as unknown as LiveHalted;
@@ -1574,7 +1591,9 @@ export function Agent() {
     for (const item of liveItems) {
       const key = item.kind === "proposal"
         ? `${sessionId ?? "draft"}_lp_${item.proposal.proposal_id}`
-        : `${sessionId ?? "draft"}_la_${item.action.audit_id || item.timestamp}`;
+        : item.kind === "scheduled_proposal"
+          ? `${sessionId ?? "draft"}_srp_${item.proposal.proposal_id}`
+          : `${sessionId ?? "draft"}_la_${item.action.audit_id || item.timestamp}`;
       rows.push({ sort: item.timestamp, render: "live", item, key });
     }
     return rows.sort((a, b) => a.sort - b.sort);
@@ -1674,6 +1693,13 @@ export function Agent() {
                       committed={row.item.committed}
                       onAdjust={submitComposerPrompt}
                     />
+                  </div>
+                );
+              }
+              if (row.item.kind === "scheduled_proposal") {
+                return (
+                  <div key={row.key} className={shouldAnimate ? "msg-enter" : undefined}>
+                    <ScheduledResearchProposalCard proposal={row.item.proposal} />
                   </div>
                 );
               }

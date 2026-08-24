@@ -16,6 +16,7 @@ from typing import Awaitable, Callable, Optional
 from zoneinfo import ZoneInfo
 
 from src.config.accessor import get_env_config
+from src.channels.bus.events import DeliveryReceipt
 from src.scheduled_research.models import (
     CRON_BOUNDS,
     DeliveryRecord,
@@ -53,7 +54,9 @@ DispatchCallback = Callable[[ScheduledResearchJob], Awaitable[Optional[str]]]
 #: session_id -> (terminal status, briefing text), or None while in flight.
 BriefingReader = Callable[[str], Optional[tuple[str, str]]]
 #: (channel, target, text) -> delivered.
-ChannelSender = Callable[[str, Optional[str], str], Awaitable[None]]
+ChannelSender = Callable[
+    [str, Optional[str], str], Awaitable[DeliveryReceipt | None]
+]
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 # Search by day, not by minute, so an impossible date (e.g. Feb 31) fails fast
@@ -94,7 +97,14 @@ def is_due(job: ScheduledResearchJob, now_ms: int) -> bool:
     schedule shorter than that gap would otherwise re-dispatch onto the same
     row and overwrite it, orphaning the briefing a sweep still owes.
     """
-    if job.status in {JobStatus.CANCELLED, JobStatus.RUNNING, JobStatus.FAILED}:
+    if job.status in {
+        JobStatus.CANCELLED,
+        JobStatus.RUNNING,
+        JobStatus.FAILED,
+        JobStatus.EXPIRED,
+    }:
+        return False
+    if job.end_at is not None and now_ms > job.end_at:
         return False
     if job.delivery.status in {DeliveryStatus.PENDING, DeliveryStatus.SENDING}:
         return False
@@ -313,6 +323,7 @@ class ScheduledResearchExecutor:
         """
         self.recover_stale_running()
         now = self._now_fn() if now_ms is None else now_ms
+        self._expire_elapsed_jobs(now)
         jobs = sorted(
             (job for job in self._store.load().values() if is_due(job, now)),
             key=lambda job: job.next_run_at,
@@ -332,6 +343,26 @@ class ScheduledResearchExecutor:
         # between "run finished" and "message sent", or a transient send error
         # is picked up here on the next tick.
         await self.sweep_deliveries()
+
+    def _expire_elapsed_jobs(self, now_ms: int) -> int:
+        """Persist jobs whose configured end boundary has elapsed."""
+        jobs = self._store.load()
+        changed = 0
+        for job in jobs.values():
+            if job.end_at is None or now_ms <= job.end_at:
+                continue
+            if job.status in {
+                JobStatus.CANCELLED,
+                JobStatus.FAILED,
+                JobStatus.EXPIRED,
+                JobStatus.RUNNING,
+            }:
+                continue
+            job.status = JobStatus.EXPIRED
+            changed += 1
+        if changed:
+            self._store.save(jobs)
+        return changed
 
     def recover_stale_running(self) -> int:
         """Reset jobs left ``RUNNING`` by a previous executor process.
@@ -466,7 +497,11 @@ class ScheduledResearchExecutor:
 
         job.next_run_at = scheduled_next_run
         if dispatch_error is None:
-            job.status = JobStatus.COMPLETED
+            job.status = (
+                JobStatus.EXPIRED
+                if job.end_at is not None and scheduled_next_run > job.end_at
+                else JobStatus.COMPLETED
+            )
             job.failure_kind = None
             job.last_error = None
         else:
@@ -478,6 +513,8 @@ class ScheduledResearchExecutor:
                 job.status = JobStatus.PENDING
                 retry_delay = self._retry_delay_ms(job.consecutive_failures)
                 job.next_run_at = max(scheduled_next_run, now_ms + retry_delay)
+                if job.end_at is not None and job.next_run_at > job.end_at:
+                    job.status = JobStatus.EXPIRED
                 logger.warning(
                     "scheduled research job %s will retry after failure %d/%d at %d",
                     job.id,
@@ -612,7 +649,9 @@ class ScheduledResearchExecutor:
             self._store.upsert(current, validate=False)
 
             try:
-                await self._channel_sender(job.delivery_channel, job.delivery_target, text)
+                receipt = await self._channel_sender(
+                    job.delivery_channel, job.delivery_target, text
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -621,7 +660,18 @@ class ScheduledResearchExecutor:
                 changed += 1
                 continue
 
-            current.delivery.status = DeliveryStatus.SENT
+            if receipt is None:
+                # Compatibility for pre-receipt injected senders used by
+                # embedders and older tests. Production adapters always return
+                # an explicit receipt through BaseChannel.send_with_receipt.
+                current.delivery.status = DeliveryStatus.SENT
+                current.delivery.provider_message_id = None
+            elif receipt.status == "sent":
+                current.delivery.status = DeliveryStatus.SENT
+                current.delivery.provider_message_id = receipt.provider_message_id
+            else:
+                current.delivery.status = DeliveryStatus.ACCEPTED
+                current.delivery.provider_message_id = receipt.provider_message_id
             current.delivery.error = None
             current.delivery.updated_at = self._now_fn()
             # The verdict rides the same write as the terminal delivery state,
