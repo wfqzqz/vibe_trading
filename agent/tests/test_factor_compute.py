@@ -475,3 +475,124 @@ def test_compare_custom_with_zoo_ranks_custom_first(monkeypatch: pytest.MonkeyPa
     assert result["ranking"][0]["source"] == "py-alpha-lib"
     assert all(r["source"] == "zoo" for r in result["ranking"][1:])
     assert result["ranking"][0]["ir"] == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Unsupported-operator error path (DORA-188 — F-03 review P1)                 #
+# --------------------------------------------------------------------------- #
+
+#: Translated body calling the doc-claimed but 0.3.0-unimplemented REF alias.
+_REF_BODY = "def compute(ctx):\n    return ctx.REF(ctx('CLOSE'), 1)\n"
+
+#: Distinct factor id so the loader's sys.modules cache (keyed by
+#: ``<factor_id>_v<version>``) cannot hand back a module registered by another
+#: test under the same id/version with a different body.
+_REF_FACTOR_ID = "refm"
+
+
+def _register_ref_factor(store: SnapshotStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(snapshot, "translate_expression", lambda expr: _REF_BODY)
+    store.register("ref_close", name=_REF_FACTOR_ID)
+
+
+def test_compute_factor_maps_missing_operator_to_factor_compute_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ctx.REF`` on an ExecContext without REF → FactorComputeError (422
+    口径), never a raw AttributeError / 500."""
+    _install_fake_alpha(monkeypatch)  # _FakeExecContext: OHLCV only, no REF
+    store = _store(tmp_path)
+    _register_ref_factor(store, monkeypatch)
+
+    panel, _, _ = _make_panel()
+    with pytest.raises(FactorComputeError) as exc_info:
+        compute_factor(store, _REF_FACTOR_ID, 1, panel)
+
+    message = str(exc_info.value)
+    assert "REF" in message
+    assert "not supported" in message
+
+
+def test_compute_endpoint_unsupported_operator_422(
+    _client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Compute of a REF factor → 422 (FactorComputeError), not 500."""
+    _install_fake_alpha(monkeypatch)
+    _register_ref_factor(_store(tmp_path), monkeypatch)
+
+    response = _client.post(
+        f"/alpha/custom/{_REF_FACTOR_ID}/compute",
+        json={"universe": "csi300", "period": "2026-2026"},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "REF" in detail
+    assert "not supported" in detail
+
+
+def test_evaluate_endpoint_unsupported_operator_422(
+    _client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Evaluate of a REF factor → 422 (FactorComputeError), not 500."""
+    _install_fake_alpha(monkeypatch)
+    _register_ref_factor(_store(tmp_path), monkeypatch)
+
+    response = _client.post(
+        f"/alpha/custom/{_REF_FACTOR_ID}/evaluate",
+        json={"universe": "csi300", "period": "2026-2026", "n_groups": 3},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "REF" in detail
+    assert "not supported" in detail
+
+
+@pytest.mark.parametrize(
+    ("handler_name", "prefix"),
+    [
+        ("cmd_alpha_custom_compute", "alpha custom compute failed"),
+        ("cmd_alpha_custom_evaluate", "alpha custom evaluate failed"),
+    ],
+)
+def test_cli_custom_reports_unsupported_operator_readably(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    handler_name: str,
+    prefix: str,
+) -> None:
+    """CLI compute/evaluate print the same readable one-line error (exit 1)."""
+    import argparse
+
+    import src.factors.cli_handlers as cli_handlers
+
+    _install_fake_alpha(monkeypatch)
+    monkeypatch.setenv("VIBE_TRADING_HOME", str(tmp_path))
+    snapshot.reset_snapshot_store()
+    _register_ref_factor(snapshot.get_snapshot_store(), monkeypatch)
+
+    panel, _, _ = _make_panel()
+    monkeypatch.setattr(
+        cli_handlers,
+        "_load_panel_and_returns",
+        lambda universe, period: (panel, _forward_returns(panel)),
+    )
+    args = argparse.Namespace(
+        factor_id=_REF_FACTOR_ID,
+        version=None,
+        universe="csi300",
+        period="2026-2026",
+        json=False,
+        verbose=False,
+        n_groups=5,
+        benchmark=[],
+    )
+    rc = getattr(cli_handlers, handler_name)(args)
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert prefix in captured.err
+    assert "REF" in captured.err
+    assert "not supported" in captured.err

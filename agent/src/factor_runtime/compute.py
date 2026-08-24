@@ -160,6 +160,26 @@ def _exec_context_class(alpha_module: Any) -> type:
     return cls
 
 
+def _unsupported_operator_error(exc: AttributeError) -> str:
+    """Format an ExecContext ``AttributeError`` into a readable compute error.
+
+    py-alpha-lib 0.3.0 implements fewer operators than its docs advertise
+    (``REF``/``HHV``/``LLV``/``HHVBARS``/``LLVBARS`` are doc-claimed aliases
+    that are not on the real ``ExecContext``). A snapshot calling one fails
+    here with ``AttributeError``; surfacing it as ``FactorComputeError`` maps
+    it to 422 (never a generic 500) and keeps the CLI error readable.
+    """
+    name = getattr(exc, "name", None)
+    if isinstance(name, str) and name:
+        hint = (
+            f"operator {name!r} is not supported by the py-alpha-lib "
+            "ExecContext (documented alias not implemented in 0.3.0)"
+        )
+    else:
+        hint = "factor compute raised an AttributeError"
+    return f"factor compute failed: {hint} ({exc})"
+
+
 def compute_factor(
     store: Any,
     factor_id: str,
@@ -181,7 +201,9 @@ def compute_factor(
     Raises:
         FactorRuntimeUnavailableError: py-alpha-lib absent (degradation).
         SnapshotNotFoundError / SnapshotValidationError: snapshot missing/tampered.
-        FactorComputeError: bad panel or an unreshapable factor result.
+        FactorComputeError: bad panel, an unreshapable factor result, or the
+            snapshot calls an operator the ExecContext does not implement
+            (``AttributeError`` → ``FactorComputeError``, DORA-188).
     """
     snapshot = store.load(factor_id, version)
     alpha_module = require_available()
@@ -190,7 +212,12 @@ def compute_factor(
     close = _validate_panel(panel)
     long_df = panel_to_long(panel)
     ctx = exec_context_cls(long_df)
-    values = snapshot.compute(ctx)
+    try:
+        values = snapshot.compute(ctx)
+    except AttributeError as exc:
+        # Doc-claimed-but-unimplemented operator (e.g. REF/HHV in 0.3.0):
+        # a readable 422 FactorComputeError, never a generic 500.
+        raise FactorComputeError(_unsupported_operator_error(exc)) from exc
     return reshape_factor_result(values, close.index, close.columns)
 
 

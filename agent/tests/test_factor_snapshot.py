@@ -379,3 +379,70 @@ def test_register_custom_factor_rejects_bad_name(
     response = _client.post("/alpha/custom", json={"expression": "close", "name": "../etc"})
 
     assert response.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# Operator-surface validation (DORA-188 — F-03 review P1)                     #
+# --------------------------------------------------------------------------- #
+
+
+class _MinimalExecContext:
+    """Minimal ExecContext surface: MA only (REF/HHV/... absent, like 0.3.0)."""
+
+    MA = staticmethod(lambda data, periods: data)
+
+
+def _install_fake_alpha_with_context(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    to_python: Any,
+    exec_context_cls: type,
+) -> types.ModuleType:
+    """Install a fake ``alpha`` with a ``lang`` translator AND an ExecContext."""
+    fake = _fake_alpha(to_python=to_python)
+    ctx_mod = types.ModuleType("alpha.context")
+    ctx_mod.ExecContext = exec_context_cls
+    fake.context = ctx_mod
+    fake.ExecContext = exec_context_cls
+    monkeypatch.setitem(sys.modules, "alpha", fake)
+    monkeypatch.setitem(sys.modules, "alpha.context", ctx_mod)
+    reset_probe()
+    return fake
+
+
+_REF_BODY = "def compute(ctx):\n    return ctx.REF(ctx('CLOSE'), 1)\n"
+_MA_BODY = "def compute(ctx):\n    return ctx.MA(ctx('CLOSE'), 5)\n"
+
+
+def test_register_custom_factor_rejects_unsupported_operator(
+    _client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ref(close,1)`` → 400 with a clear "operator not supported" message
+    (doc-claimed REF alias absent from the 0.3.0 ExecContext), never a 500."""
+    _install_fake_alpha_with_context(
+        monkeypatch, to_python=lambda *a, **k: _REF_BODY, exec_context_cls=_MinimalExecContext
+    )
+    response = _client.post("/alpha/custom", json={"expression": "ref(close,1)", "name": "m"})
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "unsupported factor operator" in detail
+    assert "REF" in detail
+    assert "not supported" in detail
+
+
+def test_register_custom_factor_accepts_supported_operator(
+    _client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A supported operator (MA) still registers — the surface check is not a
+    blanket rejection."""
+    _install_fake_alpha_with_context(
+        monkeypatch, to_python=lambda *a, **k: _MA_BODY, exec_context_cls=_MinimalExecContext
+    )
+    response = _client.post("/alpha/custom", json={"expression": "ma(close,5)", "name": "m"})
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["factor_id"] == "m"
+    assert payload["version"] == 1
