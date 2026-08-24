@@ -154,3 +154,63 @@ values directly.
 
 Evidence: §3 empirical smoke output above, `src/factors/base.py::ts_mean`,
 zoo factor files (`min_periods=n` rolling calls).
+
+## 6. F-04 closure — upgrade re-run + conflict list + lock hash (DORA-147)
+
+> Recorded by DORA-147 (F-04, 测试工程师). Everything below was re-verified on
+> the **exact pinned stack** (`numpy==2.4.6 pandas==2.3.3 bottleneck==1.6.0
+> scikit-learn==1.9.0 scipy==1.17.1 py-alpha-lib==0.3.0`) in an isolated venv,
+> plus a real `py-alpha-lib==0.3.0` reconciliation run.
+
+### 6.1 `numpy>=2` conflict list — **closed (empty)**
+
+`pip` resolves the whole stack with no conflicts, and `pip check` reports
+**"No broken requirements found"**. Per-dependency status:
+
+| Upstream dep | Pinned | numpy>=2 status |
+| --- | --- | --- |
+| `pandas` | 2.3.3 | compatible (numpy-2-native release) |
+| `bottleneck` | 1.6.0 | compatible (numpy-2-native release) |
+| `scikit-learn` | 1.9.0 | compatible (numpy-2-native release) |
+| `scipy` | 1.17.1 | compatible (numpy-2-native release) |
+| `py-alpha-lib` | 0.3.0 | **requires** `numpy>=2` |
+
+Co-import + numeric smoke (11/11 checks, `FAILURES: 0`): all five packages
+co-import at the pinned versions; `alpha.MA` == pandas rolling mean,
+`bottleneck.move_max` == pandas rolling max, `sklearn.LinearRegression` and
+`scipy.stats.pearsonr` both run on numpy 2.4.6. **No version conflict, no
+second numpy, no pin change.**
+
+### 6.2 Reconciliation regression (upgrade re-run target)
+
+New test `agent/tests/test_factor_reconciliation.py` (9 tests, `pytest.mark.integration`,
+auto-skipped on a degraded host via `pytest.importorskip("alpha")`) reconciles the
+py-alpha-lib path against the Alpha Zoo's **own** `src.factors.base` operators on a
+shared panel. Re-run it after any `py-alpha-lib` / `numpy>=2` / factor-dependency bump.
+
+Empirical warmup finding (refines the F-01 note): py-alpha-lib's rolling family is
+**not** uniformly strict-warmup —
+
+| Operator family | py-alpha-lib warmup | zoo equivalent | reconcile |
+| --- | --- | --- | --- |
+| `stddev`/`std`/`ts_std_dev` | strict (`min_periods=n`) | `ts_std` | exact |
+| `corr` / `cov` | strict (`min_periods=n`) | `ts_corr` / `ts_cov` | exact |
+| `ma`/`sma`/`mean`/`ts_mean` | **partial** (`min_periods=1`) | `ts_mean` (strict) | equal after warmup |
+| `sum` / `ts_max` / `ts_min` | **partial** (`min_periods=1`) | (n/a) / `ts_max` / `ts_min` (strict) | equal after warmup |
+
+The partial-vs-strict divergence is confined to the first `n-1` bars; from bar
+`n` onward both paths agree, and the shared IC/IR + layered math
+(`factor_analysis_core`) is unaffected — confirming the F-03 handoff note and
+extending it from `MA` to the whole mean/max/min/sum rolling family.
+
+### 6.3 Lock-file hash verification
+
+- `requirements-factor-lock.txt`: `numpy==2.4.6` and `py-alpha-lib==0.3.0`
+  hashes verified against the actual `cp314` Windows wheels (SHA256 match);
+  `pip install --dry-run --require-hashes -r requirements-factor-lock.txt`
+  accepted (no missing/mismatched hash).
+- `requirements-lock.txt`: `bottleneck==1.6.0`, `pandas==2.3.3`,
+  `scikit-learn==1.9.0`, `scipy==1.17.1` hashes verified against the actual
+  wheels (SHA256 match).
+- Any upgrade to `py-alpha-lib` / `numpy` **must** re-generate the lock
+  (`uv pip compile --generate-hashes …`) and re-run §6.2's reconciliation.
