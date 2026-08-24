@@ -1,4 +1,4 @@
-"""py-alpha-lib factor runtime (DORA-124 §3.4 module D — F-01).
+"""py-alpha-lib factor runtime (DORA-124 §3.4 module D — F-01/F-02).
 
 An **in-process** module of the agent — NOT a standalone microservice
 (DORA-124 revision v1.1, 附带澄清 1: "factor-runtime 为 agent 进程内模块").
@@ -18,8 +18,10 @@ Degradation contract (F-01):
 Submodules:
     ``availability`` — import probe, version read, degradation guard + hint.
     ``runtime`` — ``FactorRuntime`` facade with the new-factor entry points
-    (``register`` / ``compute`` / ``evaluate``); F-02/F-03 fill in the
-    translation/snapshot/compute bodies.
+    (``register`` / ``compute`` / ``evaluate``).
+    ``translator`` — ``alpha.lang`` expression → runnable code (F-02).
+    ``snapshot`` — versioned immutable snapshot store + path/content-whitelist
+    loader (F-02).
 """
 
 from src.factor_runtime.availability import (
@@ -38,6 +40,22 @@ from src.factor_runtime.runtime import (
     get_runtime,
     reset_runtime,
 )
+from src.factor_runtime.translator import (
+    FactorTranslationError,
+    translate_expression,
+)
+from src.factor_runtime.snapshot import (
+    Snapshot,
+    SnapshotConflictError,
+    SnapshotNotFoundError,
+    SnapshotStore,
+    SnapshotValidationError,
+    factors_root,
+    get_snapshot_store,
+    render_snapshot,
+    reset_snapshot_store,
+    validate_snapshot_source,
+)
 
 __all__ = [
     "DOCKER_HINT",
@@ -45,11 +63,23 @@ __all__ = [
     "FactorRuntime",
     "FactorRuntimeNotImplementedError",
     "FactorRuntimeUnavailableError",
+    "FactorTranslationError",
+    "Snapshot",
+    "SnapshotConflictError",
+    "SnapshotNotFoundError",
+    "SnapshotStore",
+    "SnapshotValidationError",
+    "factors_root",
     "get_runtime",
+    "get_snapshot_store",
     "is_available",
     "py_alpha_lib_version",
+    "render_snapshot",
     "require_available",
     "reset_probe",
     "reset_runtime",
+    "reset_snapshot_store",
     "runtime_status",
+    "translate_expression",
+    "validate_snapshot_source",
 ]

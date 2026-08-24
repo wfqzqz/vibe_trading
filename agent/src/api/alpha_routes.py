@@ -100,6 +100,10 @@ def _get_compare_semaphore() -> asyncio.Semaphore:
 _ALPHA_ID_RE = re.compile(r"^[a-z][a-z0-9]+_[a-z0-9_]{1,64}$")
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
+# Custom factor name shape (DORA-124 §4.3 / F-02). Mirrors the snapshot store's
+# factor-id gate so a name can never carry a path separator or ``..``.
+_CUSTOM_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
 # Filter enums — keep in sync with src.factors.registry.Theme / Universe.
 _VALID_ZOOS = {"alpha101", "gtja191", "qlib158", "academic", "fundamental"}
 _VALID_THEMES = {
@@ -214,6 +218,24 @@ class CompareRequest(BaseModel):
     def _sort_known(cls, v: str) -> str:
         if v not in _VALID_SORTS:
             raise ValueError(f"unknown sort {v!r}; expected one of {sorted(_VALID_SORTS)}")
+        return v
+
+
+class CustomFactorRequest(BaseModel):
+    """POST /alpha/custom body — register a factor expression as a snapshot."""
+
+    expression: str = Field(..., min_length=1, max_length=4096)
+    name: str | None = Field(None, min_length=1, max_length=64)
+
+    @field_validator("name")
+    @classmethod
+    def _name_well_formed(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not _CUSTOM_NAME_RE.fullmatch(v):
+            raise ValueError(
+                f"invalid factor name {v!r}; must match {_CUSTOM_NAME_RE.pattern}"
+            )
         return v
 
 
@@ -661,6 +683,51 @@ def register_alpha_routes(
             if job_id not in ALPHA_COMPARE_JOBS:
                 raise HTTPException(status_code=404, detail=f"job {job_id} not found")
         return _job_event_stream(ALPHA_COMPARE_JOBS, job_id, request, _compare_result_for_wire)
+
+    # -----------------------------------------------------------------------
+    # POST /alpha/custom — factor registration (DORA-124 §4.3, F-02)
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/alpha/custom",
+        status_code=201,
+        dependencies=[Depends(require_auth)],
+    )
+    async def register_custom_factor(payload: CustomFactorRequest) -> dict[str, Any]:
+        """Translate an expression and persist an immutable versioned snapshot.
+
+        Returns ``{status, factor_id, version}``. Degrades to 503 with the
+        Docker hint when py-alpha-lib is unavailable; 400 on an untranslatable
+        expression; 500 (sanitised) on any other failure.
+        """
+        from src.factor_runtime import (
+            FactorRuntimeUnavailableError,
+            FactorTranslationError,
+            get_runtime,
+        )
+
+        try:
+            result = get_runtime().register(payload.expression, name=payload.name)
+        except FactorRuntimeUnavailableError as exc:
+            # The actionable Docker hint is a curated, path-free string — safe
+            # to surface verbatim.
+            raise HTTPException(status_code=503, detail=str(exc))
+        except (FactorTranslationError, ValueError) as exc:
+            # Translation/validation failures carry a curated message (no paths,
+            # no stack frames); 400 matches the "unknown zoo"/"invalid period"
+            # convention in the sibling alpha endpoints.
+            raise HTTPException(
+                status_code=400, detail=f"invalid factor expression: {exc}"
+            )
+        except Exception as exc:  # noqa: BLE001 — never leak internals to clients
+            logger.exception("factor registration failed")
+            raise HTTPException(status_code=500, detail=_safe_error(exc))
+
+        return {
+            "status": "ok",
+            "factor_id": result["factor_id"],
+            "version": result["version"],
+        }
 
 
 # ---------------------------------------------------------------------------
