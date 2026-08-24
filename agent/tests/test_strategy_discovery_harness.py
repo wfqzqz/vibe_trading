@@ -408,6 +408,80 @@ class TestComputeEvidence:
         rows = _compute_with_fixture_windows(_write_run_fixture(tmp_path / "again"))
         assert sum(row.trades_in_regime for row in rows) == 9
 
+    def test_read_trade_pnls_returns_exit_pnl_only(self, tmp_path) -> None:
+        trades_path = _write_run_fixture(tmp_path) / "artifacts" / "trades.csv"
+        pnls = sd_artifacts.read_trade_pnls(trades_path)
+        assert pnls is not None
+        # 18 physical rows → 9 closed round trips, one (date, pnl) per exit row.
+        assert len(pnls) == 9
+        assert [d for d, _ in pnls] == sorted(ALL_TRADE_DAYS)
+        assert all(pnl == 50.0 for _, pnl in pnls), "fixture exits all realize +50.0"
+
+    def test_all_winners_carry_win_rate_one_and_zero_payoff(self, tmp_path) -> None:
+        run_dir = _write_run_fixture(tmp_path)
+        rows = _compute_with_fixture_windows(run_dir)
+        assert rows
+        for row in rows:
+            assert row.win_rate == 1.0, f"{row.regime}: all fixture trades win"
+            # Mirrors win_rate_and_stats: no losses → payoff 0.0, never inf.
+            assert row.payoff_ratio == 0.0, f"{row.regime}: payoff must be 0.0"
+
+    def test_win_rate_and_payoff_match_win_rate_and_stats(self, tmp_path) -> None:
+        run_dir = tmp_path / "mixed_run"
+        artifacts = run_dir / "artifacts"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        _engine_equity_frame().to_csv(artifacts / "equity.csv")
+        # Bear window days (Jan 14-16): two wins + one loss.
+        round_trips = [
+            (date(2024, 1, 14), "T1.SH", 100.0, "signal"),
+            (date(2024, 1, 15), "T2.SH", -50.0, "signal"),
+            (date(2024, 1, 16), "T3.SH", 200.0, "signal"),
+        ]
+        _write_trades_csv(artifacts, _engine_trade_rows(round_trips))
+        _write_run_state(run_dir, trade_count=3)
+
+        rows = _compute_with_fixture_windows(run_dir)
+        by_regime = {row.regime: row for row in rows}
+        assert set(by_regime) == {"bear_market"}
+        bear = by_regime["bear_market"]
+        assert bear.trades_in_regime == 3
+        assert bear.win_rate == pytest.approx(2 / 3)
+        # avg_win = (100 + 200) / 2 = 150; avg_loss = 50 → 3.0 (rounded 4dp).
+        assert bear.payoff_ratio == pytest.approx(3.0)
+
+    def test_missing_pnl_column_nulls_win_rate_and_payoff(self, tmp_path) -> None:
+        # Legacy one-row-per-trade artifact with NO pnl column: the trade
+        # count stays intact, but win rate / payoff are unverifiable → None.
+        run_dir = tmp_path / "no_pnl_run"
+        artifacts = run_dir / "artifacts"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        bench = _benchmark_series()
+        pd.DataFrame(
+            {
+                "date": [d.strftime("%Y-%m-%d") for d in bench.index],
+                "equity": [1_000_000.0 * (1.001**i) for i in range(DAYS)],
+                "benchmark": bench.values,
+            }
+        ).to_csv(artifacts / "equity.csv", index=False)
+        pd.DataFrame(
+            [
+                {
+                    "date": trade_date.strftime("%Y-%m-%d"),
+                    "code": "TEST.SH",
+                    "side": "sell",
+                }
+                for trade_date in ALL_TRADE_DAYS
+            ]
+        ).to_csv(artifacts / "trades.csv", index=False)
+        _write_run_state(run_dir, trade_count=len(ALL_TRADE_DAYS))
+
+        rows = _compute_with_fixture_windows(run_dir)
+        assert rows
+        for row in rows:
+            assert row.trades_in_regime >= 1
+            assert row.win_rate is None, f"{row.regime}: no pnl column → None"
+            assert row.payoff_ratio is None, f"{row.regime}: no pnl column → None"
+
     def test_benchmark_is_read_from_benchmark_equity(self, tmp_path) -> None:
         run_dir = _write_run_fixture(tmp_path)
         equity_frame = pd.read_csv(run_dir / "artifacts" / "equity.csv")

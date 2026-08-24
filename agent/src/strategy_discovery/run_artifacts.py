@@ -130,25 +130,15 @@ def _max_concurrent_positions(intervals: Sequence[tuple[date, date]]) -> int:
     return peak
 
 
-def read_trade_activity(path: Path) -> tuple[list[date], int | None] | None:
-    """Round-trip exit dates and peak concurrency from ``trades.csv``.
+def _read_trade_rows(path: Path) -> list[tuple[date, str, float | None]] | None:
+    """Parse ``trades.csv`` into ``(trade_date, code, pnl)`` rows.
 
-    Returns ``(exit_dates, max_concurrent)``:
-
-    * ``exit_dates`` — one date per closed round trip, sorted. Engine
-      artifacts hold two rows per round trip (entry row ``pnl=0.0`` plus
-      exit row with realized pnl); only exit rows count, so a round trip
-      is counted once, never twice. Legacy one-row-per-trade artifacts
-      (no zero-pnl marker rows) count every dated row.
-    * ``max_concurrent`` — peak simultaneously open positions derived
-      from the entry/exit pairs (FIFO per code, matching the engine's
-      one-position-per-symbol book), or ``None`` when the file lacks the
-      zero-pnl entry marker and concurrency is undetectable.
-
-    Returns ``None`` when the file is unusable: no date column, decode /
-    OS / CSV errors, or no usable content. Rows with unparseable dates
-    are skipped, never fatal. See the module docstring for the entry/exit
-    marker convention.
+    Shared by :func:`read_trade_activity` and :func:`read_trade_pnls` so the
+    two readers cannot disagree on which physical rows are closed trades.
+    ``pnl`` is ``None`` when the file has no pnl column or the cell is
+    unparseable; rows without a parseable date are skipped, never fatal.
+    Returns ``None`` on unreadable files (no date column, decode / OS / CSV
+    errors) instead of raising.
     """
     try:
         with path.open(newline="", encoding="utf-8-sig") as handle:
@@ -186,7 +176,36 @@ def read_trade_activity(path: Path) -> tuple[list[date], int | None] | None:
             "trades.csv at %s is unreadable (%s); treated as unusable", path, exc
         )
         return None
+    return rows
 
+
+def _has_entry_marker(rows: Sequence[tuple[date, str, float | None]]) -> bool:
+    """True when the artifact carries an engine entry row (``pnl == 0.0``)."""
+    return any(pnl is not None and pnl == 0.0 for _, _, pnl in rows)
+
+
+def read_trade_activity(path: Path) -> tuple[list[date], int | None] | None:
+    """Round-trip exit dates and peak concurrency from ``trades.csv``.
+
+    Returns ``(exit_dates, max_concurrent)``:
+
+    * ``exit_dates`` — one date per closed round trip, sorted. Engine
+      artifacts hold two rows per round trip (entry row ``pnl=0.0`` plus
+      exit row with realized pnl); only exit rows count, so a round trip
+      is counted once, never twice. Legacy one-row-per-trade artifacts
+      (no zero-pnl marker rows) count every dated row.
+    * ``max_concurrent`` — peak simultaneously open positions derived
+      from the entry/exit pairs (FIFO per code, matching the engine's
+      one-position-per-symbol book), or ``None`` when the file lacks the
+      zero-pnl entry marker and concurrency is undetectable.
+
+    Returns ``None`` when the file is unusable: no date column, decode /
+    OS / CSV errors, or no usable content. See the module docstring for the
+    entry/exit marker convention.
+    """
+    rows = _read_trade_rows(path)
+    if rows is None:
+        return None
     if not rows:
         return [], None
 
@@ -195,8 +214,7 @@ def read_trade_activity(path: Path) -> tuple[list[date], int | None] | None:
     # reloads the same artifacts with `pnl != 0` as the exit-row filter. When
     # no marker row exists, every dated row is a closed trade (legacy
     # one-row-per-trade artifacts) and concurrency is undetectable.
-    has_entry_marker = any(pnl is not None and pnl == 0.0 for _, _, pnl in rows)
-    if not has_entry_marker:
+    if not _has_entry_marker(rows):
         return sorted(trade_date for trade_date, _, _ in rows), None
 
     exit_dates: list[date] = []
@@ -216,6 +234,41 @@ def read_trade_activity(path: Path) -> tuple[list[date], int | None] | None:
             open_entries.setdefault(code, []).append(trade_date)
     exit_dates.sort()
     return exit_dates, _max_concurrent_positions(intervals)
+
+
+def read_trade_pnls(path: Path) -> list[tuple[date, float | None]] | None:
+    """Per-closed-trade ``(exit_date, pnl)`` from ``trades.csv``.
+
+    Mirrors :func:`read_trade_activity`'s entry/exit convention exactly (both
+    readers share :func:`_read_trade_rows`), so the dates line up 1:1 with
+    the trade count the harness derives from ``read_trade_activity``:
+
+    * Engine artifacts (entry rows ``pnl == 0.0``) → one entry per exit row
+      (``pnl != 0``); ``pnl`` is therefore always a finite non-zero value.
+    * Legacy one-row-per-trade artifacts (no zero-pnl marker) → one entry per
+      dated row, where ``pnl`` may be ``None`` when the file has no pnl
+      column or an unparseable cell.
+
+    A ``None`` pnl means win rate / payoff ratio cannot be computed for that
+    trade; the harness treats it as unknown rather than guessing. Returns
+    ``None`` when the file is unusable (mirrors :func:`read_trade_activity`).
+    """
+    rows = _read_trade_rows(path)
+    if rows is None:
+        return None
+    if not rows:
+        return []
+    if not _has_entry_marker(rows):
+        pairs = [(trade_date, pnl) for trade_date, _, pnl in rows]
+        pairs.sort(key=lambda pair: pair[0])
+        return pairs
+    closed = [
+        (trade_date, pnl)
+        for trade_date, _, pnl in rows
+        if pnl is not None and pnl != 0.0
+    ]
+    closed.sort(key=lambda pair: pair[0])
+    return closed
 
 
 def read_trade_dates(path: Path) -> list[date] | None:

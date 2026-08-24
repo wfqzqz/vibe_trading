@@ -73,6 +73,8 @@ EVIDENCE_FIELDS = (
     "excess_in_regime",
     "sharpe_in_regime",
     "max_drawdown_in_regime",
+    "win_rate",
+    "payoff_ratio",
     "date_ranges",
     "breakeven_fee_bps",
     "cost_sensitive",

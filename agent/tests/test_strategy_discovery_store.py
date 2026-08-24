@@ -57,6 +57,8 @@ def _row(strategy_id="alpha_zoo:a1", regime="bear_market", trades=12, **override
         excess_in_regime=0.329,
         sharpe_in_regime=0.72,
         max_drawdown_in_regime=-0.152,
+        win_rate=0.5833,
+        payoff_ratio=2.0,
         date_ranges=("2018-01 to 2018-12", "2022-01 to 2022-12"),
         breakeven_fee_bps=45.2,
         cost_sensitive=False,
@@ -116,6 +118,8 @@ class TestUpsertAndRead:
             "excess_in_regime",
             "sharpe_in_regime",
             "max_drawdown_in_regime",
+            "win_rate",
+            "payoff_ratio",
             "date_ranges",
             "breakeven_fee_bps",
             "cost_sensitive",
@@ -348,7 +352,7 @@ class TestSchemaMigration:
                     "PRAGMA table_info(strategy_regime_evidence)"
                 ).fetchall()
             }
-        for column in ("evidence_stage", "provenance", "regime_definition"):
+        for column in ("evidence_stage", "provenance", "regime_definition", "win_rate", "payoff_ratio"):
             assert column in columns, f"recreated table missing {column}"
         assert any(
             "predates columns" in record.message for record in caplog.records

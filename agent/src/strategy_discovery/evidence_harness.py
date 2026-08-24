@@ -25,6 +25,11 @@ regime labeling and the per-regime metrics. Conventions:
   those rows carry ``breakeven_fee_bps = None`` instead of a wrong number,
   plus a stable ``multi-position-breakeven:`` warning. Runs whose artifacts
   make concurrency undetectable are treated the same way (fail-closed).
+* Win rate / payoff ratio — per regime, the harness buckets each closed
+  trade's realized ``pnl`` and computes ``win_rate`` / ``payoff_ratio``
+  (``b = avg_win / avg_loss``) with :func:`models.win_rate_and_payoff`,
+  which mirrors ``backtest/metrics.py::win_rate_and_stats``. Trades without
+  a usable ``pnl`` make the pair ``None`` — never a guessed number.
 
 Missing inputs return ``[]`` with a warning: honest empty beats fabricated
 rows every time.
@@ -50,6 +55,7 @@ from src.strategy_discovery.models import (
     build_warnings,
     classify_quality,
     coverage_days_from_ranges,
+    win_rate_and_payoff,
 )
 from src.strategy_discovery.run_artifacts import (
     equity_has_non_finite,
@@ -58,6 +64,7 @@ from src.strategy_discovery.run_artifacts import (
     read_metrics_trade_count,
     read_run_status,
     read_trade_activity,
+    read_trade_pnls,
 )
 
 logger = logging.getLogger(__name__)
@@ -454,6 +461,10 @@ def compute_evidence_for_run(
         )
         return []
     trade_dates, max_concurrent = activity
+    # Realized P&L per closed trade, aligned 1:1 with ``trade_dates`` (both
+    # readers share ``run_artifacts._read_trade_rows``, so they cannot diverge
+    # on which physical rows are closed trades).
+    trade_pnls = read_trade_pnls(trades_path) or []
     series = read_equity_series(equity_path)
     if series is None:
         logger.warning(
@@ -469,6 +480,7 @@ def compute_evidence_for_run(
 
     # Bucket trades into the regime of the most recent bar on/before their date.
     trades_per_regime: dict[str, int] = {}
+    pnls_per_regime: dict[str, list[float | None]] = {}
     unlabeled_trades = 0
     for trade_date in trade_dates:
         bar_index = bisect.bisect_right(dates, trade_date) - 1
@@ -477,6 +489,14 @@ def compute_evidence_for_run(
             continue
         regime = regime_per_bar[bar_index]
         trades_per_regime[regime] = trades_per_regime.get(regime, 0) + 1
+    # Mirror the trade bucket for P&L so each regime's win rate / payoff ratio
+    # is computed from the same closed trades its trade count came from.
+    for trade_date, pnl in trade_pnls:
+        bar_index = bisect.bisect_right(dates, trade_date) - 1
+        if bar_index < 0:
+            continue
+        regime = regime_per_bar[bar_index]
+        pnls_per_regime.setdefault(regime, []).append(pnl)
     if unlabeled_trades:
         logger.info(
             "strategy %s: %d trade(s) predate the equity window and were excluded",
@@ -527,6 +547,18 @@ def compute_evidence_for_run(
         max_dd = _max_drawdown(bar_indices, equities)
         date_ranges = _month_spans(bar_indices, dates)
 
+        regime_pnls = pnls_per_regime.get(regime, [])
+        if regime_pnls and all(pnl is not None for pnl in regime_pnls):
+            win_rate, payoff_ratio = win_rate_and_payoff(
+                [pnl for pnl in regime_pnls if pnl is not None]
+            )
+        else:
+            # A trade without a usable realized pnl (or a reader mismatch that
+            # should not happen) makes the Kelly inputs unverifiable — null,
+            # never a guessed number.
+            win_rate = None
+            payoff_ratio = None
+
         if breakeven_caveat is None:
             breakeven = breakeven_fee_bps(
                 compounded_return, trades_in_regime, resolved_size
@@ -559,6 +591,8 @@ def compute_evidence_for_run(
                 excess_in_regime=excess,
                 sharpe_in_regime=sharpe,
                 max_drawdown_in_regime=max_dd,
+                win_rate=win_rate,
+                payoff_ratio=payoff_ratio,
                 date_ranges=date_ranges,
                 breakeven_fee_bps=breakeven,
                 cost_sensitive=cost_sensitive,

@@ -86,6 +86,8 @@ Every row is self-describing — the metadata travels with the numbers:
 | `provenance` | The reproducible backtest run directory the row was computed from (`artifacts/trades.csv` + `artifacts/equity.csv` inside it). The run directory holds the config and signal engine that produced the figures, so every row is traceable to a reproducible artifact |
 | `regime_definition` | JSON naming the regime-labeling parameters used (rolling benchmark window, bear/bull thresholds, Sharpe annualization) — the definition travels with the data, not hidden in code constants |
 | `breakeven_fee_bps` | Sizing-corrected cost breakeven, or `null` when the cost screen is unverifiable (see Multi-position caveat) |
+| `win_rate` | Win rate from the regime's closed trades (`wins / trades`, a decimal in `[0, 1]`); `null` when the artifacts carried no usable per-trade P&L. Mirrors `backtest/metrics.py::win_rate_and_stats` |
+| `payoff_ratio` | Payoff ratio `b = avg_win / avg_loss` (the second Kelly input), mirroring `win_rate_and_stats`'s `profit_loss_ratio`; `0.0` when there are no wins or no losses, `null` when unverifiable. Computed per closed trade, so it stays valid even on multi-position runs |
 | `decay_status` | Freshness verdict computed at read time: `fresh` \| `aging` \| `stale` (see Decay & Freshness Contract). Never stored — derived from the evidence window on every query |
 | `evidence_age_days` | Days since the end of the row's latest evidence window; the number that drives `decay_status` |
 | `staleness_days` | Days since the row's `last_verified` timestamp. Reported only — never gates anything (see Decay & Freshness Contract) |
