@@ -48,6 +48,7 @@ def kelly_fraction(
     fractional_c: float = 0.25,
     n_trades: float | None = None,
     shrink_k: float = 10.0,
+    f_cap: float = F_CAP,
 ) -> float:
     """Binary Kelly fraction with fractional discount, shrinkage and hard cap.
 
@@ -56,7 +57,7 @@ def kelly_fraction(
     so the result is ``0`` (never a positive bet on a losing edge). The raw
     fraction is then discounted by ``fractional_c``, shrunk toward zero by
     ``n/(n+k)`` when a sample size is known, and finally clamped to
-    ``[0, F_CAP]``.
+    ``[0, min(F_CAP, f_cap)]``.
 
     Args:
         win_rate: Probability of a win, ``p`` in ``[0, 1]``.
@@ -66,13 +67,18 @@ def kelly_fraction(
         fractional_c: Fractional-Kelly constant ``c`` (default 0.25).
         n_trades: Sample size ``n`` for shrinkage; ``None`` skips shrinkage.
         shrink_k: Shrinkage prior ``k`` in ``n/(n+k)`` (default 10.0).
+        f_cap: Hard ceiling for a single signal's exposure, a fraction of
+            equity. The effective ceiling is ``min(F_CAP, f_cap)`` — ``F_CAP``
+            (the module-level absolute ceiling) can never be raised by a
+            larger ``f_cap``, so Kelly only shrinks. An invalid / non-positive
+            / non-finite ``f_cap`` fails closed to ``0.0``.
 
     Returns:
-        The sized Kelly fraction, in ``[0, F_CAP]``.
+        The sized Kelly fraction, in ``[0, min(F_CAP, f_cap)]``.
 
     Invalid inputs (NaN, non-finite, ``b <= 0``, ``p`` outside ``[0, 1]``,
-    degenerate sample sizes) return ``0.0`` — a safe "no bet" fallback rather
-    than raising.
+    degenerate sample sizes, unusable ``f_cap``) return ``0.0`` — a safe
+    "no bet" fallback rather than raising.
     """
     if isinstance(win_rate, (bool, np.bool_)) or isinstance(
         payoff_ratio, (bool, np.bool_)
@@ -112,7 +118,22 @@ def kelly_fraction(
             return 0.0
         f *= n / (n + k)
 
-    return min(max(f, 0.0), F_CAP)
+    cap = F_CAP
+    if isinstance(f_cap, (bool, np.bool_)):
+        return 0.0
+    try:
+        cap_value = float(f_cap)
+    except (TypeError, ValueError):
+        return 0.0
+    # f_cap must be finite and positive to form a valid ceiling; a non-finite or
+    # non-positive cap cannot bound anything, so fail closed to no bet. The
+    # effective ceiling is min(F_CAP, f_cap): the module absolute ceiling is
+    # never raised by a larger f_cap, so Kelly only shrinks.
+    if not np.isfinite(cap_value) or cap_value <= 0.0:
+        return 0.0
+    cap = min(F_CAP, cap_value)
+
+    return min(max(f, 0.0), cap)
 
 
 def _binary_stats(returns: np.ndarray) -> tuple[float, float, int]:
@@ -153,6 +174,128 @@ def _binary_stats(returns: np.ndarray) -> tuple[float, float, int]:
     return win_rate, payoff_ratio, n
 
 
+def portfolio_returns(pos: pd.DataFrame, ret: pd.DataFrame) -> pd.Series:
+    """Portfolio return per bar implied by a weight panel (no lookahead).
+
+    ``pos[t-1]`` weights are applied to ``ret[t]`` — the same next-bar-open
+    convention the engine uses, so the first bar is ``0``. Only columns present
+    in both frames contribute. This is the portfolio-level return stream used
+    for vol-targeting: it is a single portfolio ``sigma`` derived from the
+    combined weights, never a per-symbol sigma.
+
+    Args:
+        pos: Position-weight panel (index=timestamp, columns=codes).
+        ret: Per-asset return panel (index=timestamp, columns=codes).
+
+    Returns:
+        Per-bar portfolio return series indexed like ``pos``.
+    """
+    prev = pos.shift(1).fillna(0.0)
+    common = [c for c in pos.columns if c in ret.columns]
+    aligned = ret.reindex(pos.index).fillna(0.0)
+    return (prev[common] * aligned[common]).sum(axis=1)
+
+
+def vol_target_scale(
+    portfolio_returns: pd.Series,
+    *,
+    target_vol: float,
+    periods_per_year: int = 252,
+) -> float:
+    """De-levering scale to bring realized portfolio vol to ``target_vol``.
+
+    ``scale = clip(target_vol / realized_vol, 0, 1)``. The cap at ``1.0``
+    encodes "vol-targeting only de-risks": a portfolio that is already below
+    target is left alone rather than levered up (leverage is a separate,
+    mandate-gated decision — see the ``position-sizing`` SKILL). A missing /
+    non-positive / non-finite ``target_vol``, or a window whose volatility is
+    unmeasurable, yields ``1.0`` (no change) rather than an invented factor.
+
+    Args:
+        portfolio_returns: Trailing portfolio return series (per-bar returns).
+        target_vol: Annualized portfolio volatility target, as a decimal
+            fraction (e.g. ``0.15``). Must be positive and finite.
+        periods_per_year: Bars per year for annualisation (default 252).
+
+    Returns:
+        A scale factor in ``[0, 1]``.
+    """
+    if isinstance(target_vol, (bool, np.bool_)):
+        return 1.0
+    try:
+        target = float(target_vol)
+    except (TypeError, ValueError):
+        return 1.0
+    if not np.isfinite(target) or target <= 0.0:
+        return 1.0
+
+    values = portfolio_returns.to_numpy(dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size < 2:
+        return 1.0
+    realized = float(np.std(values, ddof=1))
+    if not np.isfinite(realized) or realized <= 0.0:
+        return 1.0
+    annual = realized * np.sqrt(max(1, int(periods_per_year)))
+    if not np.isfinite(annual) or annual <= 0.0:
+        return 1.0
+    return float(np.clip(target / annual, 0.0, 1.0))
+
+
+def apply_vol_target(
+    pos: pd.DataFrame,
+    ret: pd.DataFrame,
+    *,
+    target_vol: float,
+    periods_per_year: int = 252,
+    lookback: int = 60,
+) -> pd.DataFrame:
+    """Scale a weight panel so trailing portfolio vol targets ``target_vol``.
+
+    For each bar ``t >= lookback`` the portfolio return implied by the panel's
+    own weights over ``[t-lookback, t)`` is annualised and the row is multiplied
+    by :func:`vol_target_scale`. Rows before ``lookback`` are left unchanged
+    (no usable history). Because the scale factor is ``<= 1`` and applied to the
+    whole row, gross exposure can only shrink, and the engine's later
+    ``gross <= 1`` normalisation is unaffected. The result is a pure function of
+    ``pos`` and ``ret`` — no lookahead into the decision bar.
+
+    Args:
+        pos: Position-weight panel.
+        ret: Per-asset return panel (dates x codes) aligned to ``pos``.
+        target_vol: Annualized portfolio volatility target (decimal fraction).
+        periods_per_year: Bars per year for annualisation.
+        lookback: Trailing window (in bars) over which realized vol is measured.
+
+    Returns:
+        The vol-targeted weight panel (same shape/columns as ``pos``).
+    """
+    if isinstance(target_vol, (bool, np.bool_)):
+        return pos
+    try:
+        target = float(target_vol)
+    except (TypeError, ValueError):
+        return pos
+    if not np.isfinite(target) or target <= 0.0:
+        return pos
+
+    result = pos.copy()
+    prev = pos.shift(1).fillna(0.0)
+    common = [c for c in pos.columns if c in ret.columns]
+    aligned = ret.reindex(pos.index).fillna(0.0)
+    port_ret = (prev[common] * aligned[common]).sum(axis=1)
+
+    for i in range(lookback, len(result.index)):
+        scale = vol_target_scale(
+            port_ret.iloc[i - lookback : i],
+            target_vol=target,
+            periods_per_year=periods_per_year,
+        )
+        if scale < 1.0:
+            result.iloc[i] = result.iloc[i] * scale
+    return result
+
+
 class KellyOptimizer(BaseOptimizer):
     """Per-symbol Kelly exposure scaling on top of the raw target weights.
 
@@ -167,11 +310,17 @@ class KellyOptimizer(BaseOptimizer):
         lookback: int = 60,
         fractional_c: float = 0.25,
         shrink_k: float = 10.0,
+        f_cap: float = F_CAP,
+        vol_target: float | None = None,
+        periods_per_year: int = 252,
         **kwargs: Any,
     ) -> None:
         super().__init__(lookback=lookback, **kwargs)
         self.fractional_c = fractional_c
         self.shrink_k = shrink_k
+        self.f_cap = f_cap
+        self.vol_target = vol_target
+        self.periods_per_year = periods_per_year
 
     def _build_context(
         self, window: pd.DataFrame, active: List[str]
@@ -221,6 +370,7 @@ class KellyOptimizer(BaseOptimizer):
                 fractional_c=self.fractional_c,
                 n_trades=n,
                 shrink_k=self.shrink_k,
+                f_cap=self.f_cap,
             )
         return fractions
 
@@ -274,6 +424,20 @@ class KellyOptimizer(BaseOptimizer):
             for j, c in enumerate(active):
                 result.at[dt, c] = scaled[j]
 
+        if self.vol_target is not None:
+            # Portfolio-level vol targeting: de-lever the whole panel toward
+            # ``vol_target`` using the panel's own trailing portfolio sigma
+            # (combined weights), never a per-symbol sigma. Applied after the
+            # per-symbol Kelly scaling + row renormalisation, so it shapes total
+            # exposure without disturbing the relative edge allocation.
+            result = apply_vol_target(
+                result,
+                ret,
+                target_vol=self.vol_target,
+                periods_per_year=self.periods_per_year,
+                lookback=self.lookback,
+            )
+
         return result
 
 
@@ -287,7 +451,8 @@ def optimize(
     """Module-level entry: per-symbol Kelly-scaled positions.
 
     Select via ``optimizer: "kelly"`` in ``config.json``; extra keyword args
-    (``fractional_c``, ``shrink_k``) flow through ``optimizer_params``.
+    (``fractional_c``, ``shrink_k``, ``f_cap``, ``vol_target``,
+    ``periods_per_year``) flow through ``optimizer_params``.
     """
     return KellyOptimizer(lookback=lookback, **params).optimize(ret, pos, dates)
 
