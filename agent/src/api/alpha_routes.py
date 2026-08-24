@@ -239,6 +239,43 @@ class CustomFactorRequest(BaseModel):
         return v
 
 
+class CustomComputeRequest(BaseModel):
+    """POST /alpha/custom/{factor_id}/compute body — universe/period/version."""
+
+    universe: str = Field(..., min_length=1, max_length=64)
+    period: str = Field(..., min_length=4, max_length=32)
+    version: int | None = Field(None, ge=1)
+
+    @field_validator("universe")
+    @classmethod
+    def _universe_known(cls, v: str) -> str:
+        if v not in _BENCH_UNIVERSES:
+            raise ValueError(
+                f"unknown universe {v!r}; expected one of {sorted(_BENCH_UNIVERSES)}"
+            )
+        return v
+
+
+class CustomEvaluateRequest(CustomComputeRequest):
+    """POST /alpha/custom/{factor_id}/evaluate body."""
+
+    n_groups: int = Field(5, ge=2, le=20)
+    benchmark_alpha_ids: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("benchmark_alpha_ids")
+    @classmethod
+    def _ids_well_formed(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for aid in v:
+            if not _ALPHA_ID_RE.fullmatch(aid or ""):
+                raise ValueError(f"invalid benchmark alpha_id {aid!r}")
+            if aid not in seen:
+                seen.add(aid)
+                out.append(aid)
+        return out
+
+
 # ---------------------------------------------------------------------------
 # Bench worker (runs in a thread; LLM-free, pandas-heavy)
 # ---------------------------------------------------------------------------
@@ -359,6 +396,105 @@ def _run_compare_blocking(
             job["status"] = "done"
             job["result"] = result
         job["_finished_at"] = time.time()
+
+
+def _frame_to_wire(frame: Any) -> dict[str, Any]:
+    """Project a wide DataFrame onto a JSON-safe columnar structure (NaN → None)."""
+    import numpy as _np
+
+    arr = frame.to_numpy(dtype=float)
+    values = [[None if _np.isnan(v) else v for v in row] for row in arr.tolist()]
+    return {
+        "index": [str(idx) for idx in frame.index],
+        "columns": [str(col) for col in frame.columns],
+        "values": values,
+    }
+
+
+def _custom_panel(universe: str, period: str) -> dict[str, Any]:
+    """Load the wide OHLCV panel for a custom-factor compute/evaluate (blocking)."""
+    from src.tools.alpha_bench_tool import _load_universe_panel
+
+    return _load_universe_panel(universe, period)
+
+
+def _resolve_factor_version(factor_id: str, version: int | None) -> int:
+    """Resolve an explicit version, else the latest snapshot (404 when unknown)."""
+    from src.factor_runtime import SnapshotNotFoundError, get_snapshot_store
+
+    store = get_snapshot_store()
+    resolved = version if version is not None else store.latest_version(factor_id)
+    if resolved is None:
+        raise SnapshotNotFoundError(f"no snapshot registered for factor {factor_id!r}")
+    return resolved
+
+
+def _compute_custom_blocking(
+    factor_id: str, universe: str, period: str, version: int | None
+) -> dict[str, Any]:
+    """Synchronous custom-factor compute worker (called via ``asyncio.to_thread``)."""
+    from src.factor_runtime import get_runtime
+
+    runtime = get_runtime()
+    resolved = _resolve_factor_version(factor_id, version)
+    panel = _custom_panel(universe, period)
+    frame = runtime.compute(factor_id, panel, version=resolved)
+    arr = frame.to_numpy(dtype=float)
+    nan_ratio = float((arr != arr).mean()) if arr.size else 1.0
+    return {
+        "status": "ok",
+        "factor_id": factor_id,
+        "version": resolved,
+        "source": "py-alpha-lib",
+        "py_alpha_lib": runtime.status().get("version"),
+        "universe": universe,
+        "period": period,
+        "shape": [frame.shape[0], frame.shape[1]],
+        "nan_ratio": round(nan_ratio, 4),
+        "frame": _frame_to_wire(frame),
+    }
+
+
+def _evaluate_custom_blocking(
+    factor_id: str,
+    universe: str,
+    period: str,
+    version: int | None,
+    n_groups: int,
+    benchmark_alpha_ids: list[str],
+) -> dict[str, Any]:
+    """Synchronous custom-factor evaluate worker (called via ``asyncio.to_thread``)."""
+    from src.factor_runtime import get_runtime
+    from src.tools.alpha_bench_tool import _compute_forward_returns
+
+    panel = _custom_panel(universe, period)
+    return_df = _compute_forward_returns(panel)
+    result = get_runtime().evaluate(
+        factor_id, panel, version=version, return_df=return_df, n_groups=n_groups
+    )
+
+    envelope: dict[str, Any] = {
+        "status": "ok",
+        "universe": universe,
+        "period": period,
+        **result,
+    }
+    if benchmark_alpha_ids:
+        from src.factors.compare_runner import compare_custom_with_zoo
+
+        custom_row = {
+            "id": factor_id,
+            "ic_mean": result["ic"]["mean"],
+            "ic_std": result["ic"]["std"],
+            "ir": result["ic"]["ir"],
+            "ic_positive_ratio": result["ic"]["positive_ratio"],
+            "ic_count": result["ic"]["count"],
+        }
+        benchmark = compare_custom_with_zoo(
+            custom_row, benchmark_alpha_ids, panel, return_df
+        )
+        envelope["benchmark"] = benchmark
+    return envelope
 
 
 # ---------------------------------------------------------------------------
@@ -728,6 +864,126 @@ def register_alpha_routes(
             "factor_id": result["factor_id"],
             "version": result["version"],
         }
+
+    # -----------------------------------------------------------------------
+    # POST /alpha/custom/{factor_id}/compute — factor computation (F-03)
+    # -----------------------------------------------------------------------
+
+    def _guard_custom_factor_id(factor_id: str) -> None:
+        """Reject a factor_id that cannot name a snapshot (before any IO)."""
+        if not _CUSTOM_NAME_RE.fullmatch(factor_id or ""):
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid factor_id {factor_id!r}; must match {_CUSTOM_NAME_RE.pattern}",
+            )
+
+    def _guard_factor_runtime_available() -> None:
+        """Fail fast (503, Docker hint) before loading any panel."""
+        from src.factor_runtime import DOCKER_HINT, is_available
+
+        if not is_available():
+            raise HTTPException(status_code=503, detail=DOCKER_HINT)
+
+    def _map_custom_factor_error(exc: BaseException) -> HTTPException:
+        """Map a compute/evaluate failure onto the right HTTP status."""
+        from src.factor_runtime import (
+            FactorComputeError,
+            FactorRuntimeUnavailableError,
+            SnapshotNotFoundError,
+            SnapshotValidationError,
+        )
+
+        if isinstance(exc, FactorRuntimeUnavailableError):
+            return HTTPException(status_code=503, detail=str(exc))
+        if isinstance(exc, SnapshotNotFoundError):
+            return HTTPException(status_code=404, detail={"status": "error", "error": str(exc)})
+        if isinstance(exc, (SnapshotValidationError, FactorComputeError)):
+            return HTTPException(status_code=422, detail=str(exc))
+        if isinstance(exc, ValueError):
+            # Bad universe/period from the panel loader — curated message.
+            return HTTPException(status_code=400, detail=str(exc))
+        if isinstance(exc, RuntimeError):
+            # TUSHARE_TOKEN unset / empty panel — curated message.
+            return HTTPException(status_code=422, detail=str(exc))
+        logger.exception("custom factor compute/evaluate failed")
+        return HTTPException(status_code=500, detail=_safe_error(exc))
+
+    @app.post(
+        "/alpha/custom/{factor_id}/compute",
+        dependencies=[Depends(require_auth)],
+    )
+    async def compute_custom_factor(
+        factor_id: str, payload: CustomComputeRequest
+    ) -> dict[str, Any]:
+        """Compute a registered factor over an A-share-caliber panel (container).
+
+        Returns ``{status, factor_id, version, source, py_alpha_lib, shape,
+        nan_ratio, frame}`` where ``frame`` is the columnar factor-value matrix
+        aligned to the universe's date × code grid.
+        """
+        _guard_custom_factor_id(factor_id)
+        from src.tools.alpha_bench_tool import _parse_period
+
+        try:
+            _parse_period(payload.period)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid period: {exc}")
+
+        _guard_factor_runtime_available()
+        try:
+            return await asyncio.to_thread(
+                _compute_custom_blocking,
+                factor_id,
+                payload.universe,
+                payload.period,
+                payload.version,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — mapped below
+            raise _map_custom_factor_error(exc)
+
+    # -----------------------------------------------------------------------
+    # POST /alpha/custom/{factor_id}/evaluate — IC/IR + layered returns (F-03)
+    # -----------------------------------------------------------------------
+
+    @app.post(
+        "/alpha/custom/{factor_id}/evaluate",
+        dependencies=[Depends(require_auth)],
+    )
+    async def evaluate_custom_factor(
+        factor_id: str, payload: CustomEvaluateRequest
+    ) -> dict[str, Any]:
+        """Evaluate a factor: IC/IR + layered returns, optionally vs zoo factors.
+
+        Uses the same panel loader, forward returns, and IC/layered math as the
+        zoo bench, so ``ic`` / ``layered_returns`` are directly comparable to
+        preset factors. When ``benchmark_alpha_ids`` is given, a ``benchmark``
+        ranking merges the custom factor with those zoo alphas on one entry.
+        """
+        _guard_custom_factor_id(factor_id)
+        from src.tools.alpha_bench_tool import _parse_period
+
+        try:
+            _parse_period(payload.period)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid period: {exc}")
+
+        _guard_factor_runtime_available()
+        try:
+            return await asyncio.to_thread(
+                _evaluate_custom_blocking,
+                factor_id,
+                payload.universe,
+                payload.period,
+                payload.version,
+                payload.n_groups,
+                payload.benchmark_alpha_ids,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — mapped below
+            raise _map_custom_factor_error(exc)
 
 
 # ---------------------------------------------------------------------------

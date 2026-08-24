@@ -7,10 +7,9 @@ installed:
   zoo presets stay untouched, and the new-factor entry points raise
   ``FactorRuntimeUnavailableError`` carrying the Docker hint;
 * **available** (container): a fake ``alpha`` module in ``sys.modules`` makes
-  the probe pass, and the compute/evaluate entry points then raise
-  ``FactorRuntimeNotImplementedError`` (F-03 seam) — proving the guard let
-  them through. (``register`` is implemented by F-02 and covered in
-  ``test_factor_snapshot.py``.)
+  the probe pass, so the entry points get past the guard (``register`` is
+  implemented by F-02, ``compute``/``evaluate`` by F-03 — see
+  ``test_factor_snapshot.py`` / ``test_factor_compute.py``).
 
 No network; deterministic. The probe cache is reset per test.
 """
@@ -27,9 +26,9 @@ import pytest
 import src.factor_runtime.availability as availability
 from src.factor_runtime import (
     DOCKER_HINT,
-    FactorRuntimeNotImplementedError,
     FactorRuntimeUnavailableError,
     FactorRuntime,
+    SnapshotNotFoundError,
     get_runtime,
     is_available,
     py_alpha_lib_version,
@@ -139,22 +138,21 @@ def test_status_reports_available_and_version(monkeypatch: pytest.MonkeyPatch) -
     assert status["hint"] is None
 
 
-def test_compute_evaluate_raise_not_implemented_when_available(
+def test_compute_evaluate_pass_guard_when_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Proves the guard passes in a healthy container, then hits the F-03 seam.
+    """Proves the guard passes in a healthy container (compute/evaluate now run).
 
-    ``register`` is implemented by F-02 (see ``test_factor_snapshot.py``) and
-    therefore no longer raises here.
+    With a fake ``alpha`` (MA marker only) and no snapshot registered, the entry
+    points should proceed past ``require_available()`` and fail on the missing
+    snapshot — NOT degrade to the Docker hint.
     """
     monkeypatch.setitem(sys.modules, "alpha", _fake_alpha())
     runtime = get_runtime()
-    with pytest.raises(FactorRuntimeNotImplementedError) as exc_info:
+    with pytest.raises(SnapshotNotFoundError):
         runtime.compute("factor_x", {})
-    assert "F-03" in str(exc_info.value)
-    with pytest.raises(FactorRuntimeNotImplementedError) as exc_info:
+    with pytest.raises(SnapshotNotFoundError):
         runtime.evaluate("factor_x", {})
-    assert "F-03" in str(exc_info.value)
 
 
 def test_sanity_marker_missing_means_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
