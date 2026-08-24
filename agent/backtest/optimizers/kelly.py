@@ -34,6 +34,12 @@ from backtest.optimizers.base import BaseOptimizer
 # ``position-sizing`` SKILL.
 F_CAP = 0.25
 
+#: ADV participation ceiling from the ``execution-model`` SKILL: never deploy a
+#: single position larger than 5% of average daily volume. Sizing that breaches
+#: ~5% of ADV is rejected regardless of what Kelly asks for; this constant is the
+#: fraction-of-equity proxy used by :func:`f_cap_from_limits`.
+ADV_PARTICIPATION_CAP = 0.05
+
 
 def kelly_fraction(
     win_rate: float,
@@ -284,3 +290,322 @@ def optimize(
     (``fractional_c``, ``shrink_k``) flow through ``optimizer_params``.
     """
     return KellyOptimizer(lookback=lookback, **params).optimize(ret, pos, dates)
+
+
+# --------------------------------------------------------------------------- #
+# K-04 — research/simulation notional link
+# --------------------------------------------------------------------------- #
+# The optimizer above scales a *weight panel*. The research/simulation chain
+# (Shadow Account / paper) needs a *dollar notional* per position, so the same
+# Kelly recipe is lifted to the notional layer here:
+#
+#   f_final = min(f_kelly, f_cap)          # f_cap from the four risk limits
+#   notional_usd = f_final * equity
+#   risk_budget_usd = notional_usd * strategy_vol
+#
+# These are pure functions: no I/O, no order path. They take the backtest
+# engine's sizing weights (``target_positions.csv`` from
+# ``backtest/engines/base.py::_write_artifacts``) plus equity and a per-strategy
+# p/b pair and return a notional *intent*. Real broker execution stays out of
+# scope (DORA-122 decision point 3); the reserved ``src.live.kelly_sizing_hook``
+# is the future gate that would route these intents through the live mandate
+# checks.
+
+
+def resolve_kelly_inputs(
+    win_rate: float | None,
+    payoff_ratio: float | None,
+) -> tuple[float, float] | None:
+    """Reconcile the evidence layer's p/b with :func:`kelly_fraction`'s contract.
+
+    ``strategy_discovery/models.py::win_rate_and_payoff`` (a faithful mirror of
+    ``backtest/metrics.py::win_rate_and_stats``) reports an all-win regime as
+    ``payoff_ratio = 0.0`` — its ``1e-10`` sentinel collapses to zero. But
+    :func:`kelly_fraction` requires ``b > 0`` (``b = +inf`` for "no losses"), so
+    feeding that ``0.0`` straight through would silently size an all-win regime
+    as "no edge → no bet". This helper closes that contract gap (the K-03 → K-04
+    handoff):
+
+    * ``win_rate is None`` or ``payoff_ratio is None`` (no usable P&L) → ``None``
+      (callers treat this as no edge and never guess a number).
+    * all-win regime (``win_rate == 1.0`` and ``payoff_ratio == 0.0``) →
+      ``(1.0, +inf)`` so Kelly yields ``f* = p`` instead of ``0``.
+    * anything else → passed through unchanged; :func:`kelly_fraction` remains
+      the single validator for the remaining degenerate inputs.
+
+    Args:
+        win_rate: Decimal win probability ``p`` (``None`` when unknown).
+        payoff_ratio: Payoff ratio ``b = avg_win / avg_loss`` (``None`` when
+            unknown).
+
+    Returns:
+        ``(win_rate, payoff_ratio)`` ready for :func:`kelly_fraction`, or
+        ``None`` when there is no usable p/b pair.
+    """
+    if win_rate is None or payoff_ratio is None:
+        return None
+    try:
+        p = float(win_rate)
+        b = float(payoff_ratio)
+    except (TypeError, ValueError):
+        return None
+    # The evidence-layer all-win sentinel (payoff 0.0 with a perfect win rate)
+    # must map to b = +inf BEFORE kelly_fraction, which reads b <= 0 as no edge.
+    if p == 1.0 and b == 0.0:
+        return p, float("inf")
+    return p, b
+
+
+def _no_bet() -> dict[str, float]:
+    """The fail-closed sizing result: no fraction, no notional, no risk budget."""
+    return {"f_final": 0.0, "notional_usd": 0.0, "risk_budget_usd": 0.0}
+
+
+def _positive_float(value: object) -> float | None:
+    """Coerce ``value`` to a finite strictly-positive float, else ``None``."""
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(out) or out <= 0.0:
+        return None
+    return out
+
+
+def _risk_budget(notional_usd: float, strategy_vol: float) -> float:
+    """Dollar risk budget for a notional at ``strategy_vol``, fail-closed.
+
+    ``notional_usd * strategy_vol`` is the one-standard-deviation dollar risk of
+    the position. A missing / non-finite / negative ``strategy_vol`` yields
+    ``0.0`` rather than a fabricated or negative budget.
+    """
+    vol = _positive_float(strategy_vol) if strategy_vol is not None else None
+    if vol is None:
+        # A strategy with unknown or non-positive volatility has no measurable
+        # risk budget; report 0.0 instead of inventing one. (This is the only
+        # place a negative is rejected without fail-closing the whole sizing —
+        # the notional itself is still valid.)
+        return 0.0
+    return notional_usd * vol
+
+
+def f_cap_from_limits(
+    equity: float,
+    *,
+    single_trade_notional_cap: float | None = None,
+    total_exposure_cap: float | None = None,
+    leverage_cap: float | None = None,
+    adv_participation_cap: float | None = ADV_PARTICIPATION_CAP,
+) -> float:
+    """Compute the hard-cap fraction ``f_cap`` from the four risk limits.
+
+    Mirrors the ``position-sizing`` SKILL Stage 4 recipe verbatim::
+
+        f_cap = min(
+            single_trade_notional_cap / equity,   # USD → fraction of equity
+            total_exposure_cap / equity,          # USD → fraction of equity
+            leverage_cap,                         # already a fraction (1.0 = no leverage)
+            adv_participation_cap,                # 0.05 from execution-model
+        )
+
+    Each limit that is ``None``, non-finite, or non-positive is treated as "no
+    limit" (skipped) rather than binding at zero. A non-positive / non-finite
+    ``equity`` returns ``0.0`` (no bet possible). The default
+    ``adv_participation_cap`` keeps a 5%-of-equity ceiling in place even when
+    every other limit is absent, matching the SKILL's worked example where the
+    ADV cap is the binding constraint.
+
+    Args:
+        equity: Account equity in USD (must be finite and positive).
+        single_trade_notional_cap: Max USD for a single position, or ``None``.
+        total_exposure_cap: Max aggregate gross exposure in USD, or ``None``.
+        leverage_cap: Max allowed leverage as a fraction (``1.0`` = no
+            leverage), or ``None``.
+        adv_participation_cap: ADV participation ceiling as a fraction of
+            equity (defaults to :data:`ADV_PARTICIPATION_CAP` = 0.05).
+
+    Returns:
+        The minimum of the applicable limits (each expressed as a fraction of
+        equity), or ``0.0`` when equity is unusable or no positive limit is
+        supplied. In practice the default ADV ceiling keeps it at or below
+        ``0.05``; :func:`kelly_notional` then bounds ``f_final`` to
+        ``min(f_kelly, f_cap)`` so Kelly never amplifies.
+    """
+    if equity is None:
+        return 0.0
+    eq = _positive_float(equity)
+    if eq is None:
+        return 0.0
+
+    limits: list[float] = []
+    for usd_cap in (single_trade_notional_cap, total_exposure_cap):
+        value = _positive_float(usd_cap)
+        if value is not None:
+            limits.append(value / eq)
+    for frac_cap in (leverage_cap, adv_participation_cap):
+        value = _positive_float(frac_cap)
+        if value is not None:
+            limits.append(value)
+
+    if not limits:
+        return 0.0
+    return min(limits)
+
+
+def kelly_notional(
+    equity: float,
+    win_rate: float | None,
+    payoff_ratio: float | None,
+    *,
+    strategy_vol: float,
+    fractional_c: float = 0.25,
+    shrink_n: float | None = None,
+    f_cap: float = F_CAP,
+) -> dict[str, float]:
+    """Kelly-sized notional for a single signal from equity and a p/b pair.
+
+    The K-04 counterpart to :func:`kelly_fraction`: the same four-stage recipe
+    (binary Kelly → fractional discount → shrinkage → hard cap) lifted to
+    dollars, producing the notional *intent* the research/simulation chain
+    consumes.
+
+        f_final = min(f_kelly, f_cap)          # f_cap binds, never amplifies
+        notional_usd = f_final * equity
+        risk_budget_usd = notional_usd * strategy_vol
+
+    ``f_final <= f_cap`` holds by construction (``min``), and ``f_final`` is
+    additionally bounded above by :data:`F_CAP` through :func:`kelly_fraction`.
+    Every invalid input degrades to :func:`_no_bet` — a zero result, never a
+    raise — matching the fail-closed contract of the rest of this module.
+
+    Args:
+        equity: Account equity in USD (finite and positive).
+        win_rate: Decimal win probability ``p`` (``None`` → no edge).
+        payoff_ratio: Payoff ratio ``b`` (``None`` → no edge; an all-win
+            ``(1.0, 0.0)`` pair is mapped to ``b = +inf`` via
+            :func:`resolve_kelly_inputs`).
+        strategy_vol: Annualized strategy volatility as a decimal fraction
+            (e.g. ``0.20``); used only for the risk-budget output.
+        fractional_c: Fractional-Kelly constant ``c`` (default 0.25).
+        shrink_n: Sample size ``n`` for ``n/(n+k)`` shrinkage (default ``None``
+            skips shrinkage; the shrinkage prior stays at its ``10.0`` default).
+        f_cap: Hard ceiling from :func:`f_cap_from_limits` (default
+            :data:`F_CAP`).
+
+    Returns:
+        ``{"f_final", "notional_usd", "risk_budget_usd"}`` with
+        ``f_final in [0, min(f_cap, F_CAP)]``.
+    """
+    inputs = resolve_kelly_inputs(win_rate, payoff_ratio)
+    if inputs is None:
+        return _no_bet()
+    p, b = inputs
+
+    eq = _positive_float(equity)
+    if eq is None:
+        return _no_bet()
+
+    f_kelly = kelly_fraction(
+        p,
+        b,
+        fractional_c=fractional_c,
+        n_trades=shrink_n,
+        shrink_k=10.0,
+    )
+
+    cap = _positive_float(f_cap) if f_cap is not None else None
+    if cap is None:
+        return _no_bet()
+    f_final = min(f_kelly, cap)
+
+    notional_usd = f_final * eq
+    return {
+        "f_final": f_final,
+        "notional_usd": notional_usd,
+        "risk_budget_usd": _risk_budget(notional_usd, strategy_vol),
+    }
+
+
+def kelly_position_intents(
+    weights: dict[str, float],
+    equity: float,
+    win_rate: float | None,
+    payoff_ratio: float | None,
+    *,
+    strategy_vol: float,
+    fractional_c: float = 0.25,
+    shrink_n: float | None = None,
+    f_cap: float = F_CAP,
+) -> dict[str, Any]:
+    """Convert backtest sizing weights into Kelly-scaled notional intents.
+
+    The research/simulation integration point (K-04): the backtest engine's
+    sizing weights (its ``target_positions.csv`` weight panel, one row per
+    active symbol) are scaled by the strategy-level ``f_final`` from
+    :func:`kelly_notional` and expressed as a per-symbol notional.
+
+        notional(symbol) = weight(symbol) * f_final * equity
+
+    Weights are kept signed (a short carries a negative notional); the aggregate
+    ``notional_usd`` / ``risk_budget_usd`` are the gross (absolute) sums so a
+    long/short book is not understated. Non-finite or zero weights are skipped.
+    This is a pure function — it produces intents only, never an order.
+
+    Args:
+        weights: Mapping of symbol → target weight from the backtest sizing
+            layer (``target_positions.csv``). Accepts any mapping with
+            ``.items()`` (``dict``, ``pandas.Series``, a ``DataFrame`` row).
+        equity: Account equity in USD.
+        win_rate / payoff_ratio: Per-strategy p/b pair (see
+            :func:`kelly_notional`).
+        strategy_vol: Annualized strategy volatility (risk-budget output).
+        fractional_c / shrink_n / f_cap: Kelly recipe parameters (see
+            :func:`kelly_notional`).
+
+    Returns:
+        ``{"f_final", "notional_usd", "risk_budget_usd", "positions"}`` where
+        ``positions`` is a list of ``{"symbol", "weight", "notional_usd",
+        "risk_budget_usd"}``, one per active symbol.
+    """
+    sizing = kelly_notional(
+        equity,
+        win_rate,
+        payoff_ratio,
+        strategy_vol=strategy_vol,
+        fractional_c=fractional_c,
+        shrink_n=shrink_n,
+        f_cap=f_cap,
+    )
+    f_final = sizing["f_final"]
+    # f_final * equity == sizing["notional_usd"], so per-symbol notional is just
+    # the weight scaled by the strategy's total Kelly notional.
+    unit_notional = sizing["notional_usd"]
+    unit_risk = sizing["risk_budget_usd"]
+
+    positions: list[dict[str, Any]] = []
+    gross = 0.0
+    for symbol, weight in weights.items():
+        try:
+            w = float(weight)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(w) or w == 0.0:
+            continue
+        positions.append(
+            {
+                "symbol": str(symbol),
+                "weight": w,
+                "notional_usd": w * unit_notional,
+                "risk_budget_usd": abs(w) * unit_risk,
+            }
+        )
+        gross += abs(w)
+
+    return {
+        "f_final": f_final,
+        "notional_usd": gross * unit_notional,
+        "risk_budget_usd": gross * unit_risk,
+        "positions": positions,
+    }
