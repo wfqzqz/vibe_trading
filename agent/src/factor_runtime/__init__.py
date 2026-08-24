@@ -22,6 +22,8 @@ Submodules:
     ``translator`` — ``alpha.lang`` expression → runnable code (F-02).
     ``snapshot`` — versioned immutable snapshot store + path/content-whitelist
     loader (F-02).
+    ``compute`` — wide-panel ↔ ``ExecContext`` adapter + IC/IR + layered-return
+    evaluation (F-03).
 """
 
 from src.factor_runtime.availability import (
@@ -34,9 +36,15 @@ from src.factor_runtime.availability import (
     reset_probe,
     runtime_status,
 )
+from src.factor_runtime.compute import (
+    FactorComputeError,
+    compute_factor,
+    evaluate_factor,
+    panel_to_long,
+    reshape_factor_result,
+)
 from src.factor_runtime.runtime import (
     FactorRuntime,
-    FactorRuntimeNotImplementedError,
     get_runtime,
     reset_runtime,
 )
@@ -60,8 +68,8 @@ from src.factor_runtime.snapshot import (
 __all__ = [
     "DOCKER_HINT",
     "EXPECTED_VERSION",
+    "FactorComputeError",
     "FactorRuntime",
-    "FactorRuntimeNotImplementedError",
     "FactorRuntimeUnavailableError",
     "FactorTranslationError",
     "Snapshot",
@@ -69,16 +77,20 @@ __all__ = [
     "SnapshotNotFoundError",
     "SnapshotStore",
     "SnapshotValidationError",
+    "compute_factor",
+    "evaluate_factor",
     "factors_root",
     "get_runtime",
     "get_snapshot_store",
     "is_available",
+    "panel_to_long",
     "py_alpha_lib_version",
     "render_snapshot",
     "require_available",
     "reset_probe",
     "reset_runtime",
     "reset_snapshot_store",
+    "reshape_factor_result",
     "runtime_status",
     "translate_expression",
     "validate_snapshot_source",

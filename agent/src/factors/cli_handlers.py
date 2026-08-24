@@ -907,6 +907,139 @@ def cmd_alpha_export_manifest(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Custom factor compute/evaluate (DORA-124 §4.3 / F-03)                       #
+# --------------------------------------------------------------------------- #
+
+
+def _require_factor_runtime() -> Any:
+    """Return the process-wide ``FactorRuntime`` or raise with a Docker hint."""
+    from src.factor_runtime import DOCKER_HINT, get_runtime, is_available
+
+    if not is_available():
+        raise RuntimeError(DOCKER_HINT)
+    return get_runtime()
+
+
+def _load_panel_and_returns(universe: str, period: str) -> tuple[dict[str, Any], Any]:
+    """Load the wide OHLCV panel + forward returns (same functions as the zoo bench)."""
+    from src.tools.alpha_bench_tool import _compute_forward_returns, _load_universe_panel
+
+    panel = _load_universe_panel(universe, period)
+    return panel, _compute_forward_returns(panel)
+
+
+def _resolve_version(runtime: Any, factor_id: str, version: int | None) -> int:
+    from src.factor_runtime import SnapshotNotFoundError, get_snapshot_store
+
+    store = get_snapshot_store()
+    resolved = version if version is not None else store.latest_version(factor_id)
+    if resolved is None:
+        raise SnapshotNotFoundError(f"no snapshot registered for factor {factor_id!r}")
+    return resolved
+
+
+def cmd_alpha_custom_compute(args: argparse.Namespace) -> int:
+    """``vibe-trading alpha custom compute <factor_id>`` — factor values over a universe."""
+    try:
+        runtime = _require_factor_runtime()
+        version = _resolve_version(runtime, args.factor_id, args.version)
+        panel, _ = _load_panel_and_returns(args.universe, args.period)
+        frame = runtime.compute(args.factor_id, panel, version=version)
+    except Exception as exc:  # noqa: BLE001
+        return _handle_exception(args, "alpha custom compute failed", exc)
+
+    if getattr(args, "json", False):
+        payload = {
+            "status": "ok",
+            "factor_id": args.factor_id,
+            "version": version,
+            "source": "py-alpha-lib",
+            "py_alpha_lib": runtime.status().get("version"),
+            "universe": args.universe,
+            "period": args.period,
+            "shape": [frame.shape[0], frame.shape[1]],
+            "index": [str(i) for i in frame.index],
+            "columns": [str(c) for c in frame.columns],
+        }
+        _print(json.dumps(payload, ensure_ascii=False))
+        return 0
+
+    title = f"factor {args.factor_id} v{version} — {args.universe} {args.period}"
+    if _console is not None:
+        table = Table(title=title)
+        table.add_column("date", style="cyan", no_wrap=True)
+        for col in frame.columns[:10]:
+            table.add_column(str(col), justify="right")
+        for date, row in frame.iloc[:20].iterrows():
+            table.add_row(str(date), *[f"{v:.4f}" if v == v else "nan" for v in row[:10]])
+        _console.print(table)
+        if frame.shape[1] > 10:
+            _hint(f"(showing 10 of {frame.shape[1]} columns; pass --json for the full matrix)")
+    else:
+        _print(frame.round(4).to_string())
+    return 0
+
+
+def cmd_alpha_custom_evaluate(args: argparse.Namespace) -> int:
+    """``vibe-trading alpha custom evaluate <factor_id>`` — IC/IR + layered returns."""
+    try:
+        runtime = _require_factor_runtime()
+        version = _resolve_version(runtime, args.factor_id, args.version)
+        panel, return_df = _load_panel_and_returns(args.universe, args.period)
+        result = runtime.evaluate(
+            args.factor_id,
+            panel,
+            version=version,
+            return_df=return_df,
+            n_groups=args.n_groups,
+        )
+        envelope: dict[str, Any] = {
+            "status": "ok",
+            "universe": args.universe,
+            "period": args.period,
+            **result,
+        }
+        if args.benchmark:
+            from src.factors.compare_runner import compare_custom_with_zoo
+
+            custom_row = {
+                "id": args.factor_id,
+                "ic_mean": result["ic"]["mean"],
+                "ic_std": result["ic"]["std"],
+                "ir": result["ic"]["ir"],
+                "ic_positive_ratio": result["ic"]["positive_ratio"],
+                "ic_count": result["ic"]["count"],
+            }
+            envelope["benchmark"] = compare_custom_with_zoo(
+                custom_row, args.benchmark, panel, return_df
+            )
+    except Exception as exc:  # noqa: BLE001
+        return _handle_exception(args, "alpha custom evaluate failed", exc)
+
+    if getattr(args, "json", False):
+        _print(json.dumps(envelope, ensure_ascii=False))
+        return 0
+
+    ic = envelope["ic"]
+    _print(
+        f"[bold]factor[/bold] {args.factor_id} v{envelope['version']} "
+        f"({envelope['source']} {envelope['py_alpha_lib']})"
+        if _console
+        else f"factor {args.factor_id} v{envelope['version']} ({envelope['source']} {envelope['py_alpha_lib']})"
+    )
+    _print(
+        f"IC mean={ic['mean']}  std={ic['std']}  IR={ic['ir']}  "
+        f"IC+={ic['positive_ratio']}  N={ic['count']}"
+    )
+    lr = envelope["layered_returns"]
+    _print(f"layered returns ({lr['n_groups']} groups) final NAV: {lr['final_nav']}")
+    _print(f"long-short spread: {lr['long_short_spread']}")
+    if envelope.get("benchmark"):
+        _render_compare_table(envelope["benchmark"]["ranking"], "ir")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # Subparser + dispatch wiring                                                 #
 # --------------------------------------------------------------------------- #
 
@@ -917,6 +1050,11 @@ _DISPATCH: dict[str, Callable[[argparse.Namespace], int]] = {
     "bench": cmd_alpha_bench,
     "compare": cmd_alpha_compare,
     "export-manifest": cmd_alpha_export_manifest,
+}
+
+_CUSTOM_DISPATCH: dict[str, Callable[[argparse.Namespace], int]] = {
+    "compute": cmd_alpha_custom_compute,
+    "evaluate": cmd_alpha_custom_evaluate,
 }
 
 
@@ -1061,8 +1199,64 @@ def add_subparser(subparsers: Any) -> argparse.ArgumentParser:
     p_export.add_argument("--out", required=True, help="Output JSON path")
     p_export.add_argument("--force", action="store_true", help="Allow writing outside the repo root")
 
+    p_custom = alpha_sub.add_parser(
+        "custom", help="Custom factor runtime: compute / evaluate (py-alpha-lib)"
+    )
+    custom_sub = p_custom.add_subparsers(dest="custom_command")
+
+    p_custom_compute = custom_sub.add_parser(
+        "compute", help="Compute a registered factor over a universe"
+    )
+    p_custom_compute.add_argument("factor_id", help="Registered factor id")
+    _add_custom_data_args(p_custom_compute)
+
+    p_custom_evaluate = custom_sub.add_parser(
+        "evaluate", help="Evaluate IC/IR + layered returns (optionally vs zoo)"
+    )
+    p_custom_evaluate.add_argument("factor_id", help="Registered factor id")
+    _add_custom_data_args(p_custom_evaluate)
+    p_custom_evaluate.add_argument(
+        "--n-groups",
+        type=int,
+        default=5,
+        help="Quantile groups for the layered backtest (default: 5)",
+    )
+    p_custom_evaluate.add_argument(
+        "--benchmark",
+        nargs="*",
+        default=[],
+        metavar="ALPHA_ID",
+        help="Zoo alpha ids to rank alongside the custom factor on the same panel",
+    )
+
     _ALPHA_PARSER = alpha_parser
     return alpha_parser
+
+
+def _add_custom_data_args(parser: argparse.ArgumentParser) -> None:
+    """Add the shared ``--universe/--period/--version/--json`` args for custom cmd."""
+    parser.add_argument(
+        "--universe",
+        default="csi300",
+        choices=_UNIVERSE_CHOICES,
+        help=f"Universe (default: csi300; one of {', '.join(_UNIVERSE_CHOICES)})",
+    )
+    parser.add_argument(
+        "--period",
+        default="2020-2025",
+        help="Period spec: YYYY-YYYY or YYYY-MM-DD/YYYY-MM-DD (e.g. 2020-2025)",
+    )
+    parser.add_argument(
+        "--version",
+        type=int,
+        default=None,
+        help="Snapshot version (default: latest registered version)",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a JSON envelope instead of a rendered table",
+    )
 
 
 def dispatch(args: argparse.Namespace) -> int:
@@ -1077,6 +1271,16 @@ def dispatch(args: argparse.Namespace) -> int:
         else:
             _err("alpha requires a subcommand. Try: vibe-trading alpha list")
         return 1
+    if sub == "custom":
+        custom_sub = getattr(args, "custom_command", None)
+        if custom_sub is None:
+            _err("alpha custom requires a subcommand. Try: vibe-trading alpha custom evaluate <id>")
+            return 1
+        handler = _CUSTOM_DISPATCH.get(custom_sub)
+        if handler is None:
+            _err(f"alpha custom: unknown subcommand {custom_sub!r}")
+            return 1
+        return handler(args)
     handler = _DISPATCH.get(sub)
     if handler is None:
         _err(f"alpha: unknown subcommand {sub!r}")

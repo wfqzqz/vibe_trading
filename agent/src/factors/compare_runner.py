@@ -20,7 +20,7 @@ import logging
 from typing import Any, Callable, Iterable
 
 from src.factors import bench_runner
-from src.factors.registry import Registry
+from src.factors.registry import Registry, get_default_registry
 
 logger = logging.getLogger(__name__)
 
@@ -207,3 +207,73 @@ def compare_alphas(
         "ranking": ranking,
         "skipped": skipped,
     }
+
+
+def compare_custom_with_zoo(
+    custom_row: dict[str, Any],
+    alpha_ids: Iterable[str],
+    panel: dict[str, Any],
+    return_df: Any,
+    *,
+    registry: Registry | None = None,
+) -> dict[str, Any]:
+    """Rank a custom factor's IC/IR row alongside zoo alphas on a shared panel.
+
+    This is the "同一横评入口" (same cross-eval entry) bridge from DORA-124
+    §3.4: it evaluates preset zoo factors with ``Registry.compute`` and the
+    custom factor through py-alpha-lib, then merges them into one ranking over
+    the *same* panel + forward returns + IC math (``bench_runner``).
+
+    Args:
+        custom_row: The custom factor's bench-format row (``id``, ``source``,
+            ``ic_mean``, ``ic_std``, ``ir``, ``ic_positive_ratio``, ``ic_count``).
+        alpha_ids: Preset zoo alpha ids to compare against.
+        panel: The already-loaded wide OHLCV panel.
+        return_df: The forward-returns frame derived from ``panel``.
+        registry: Optional pre-built registry (test injection).
+
+    Returns:
+        ``{"ranking": [...], "skipped": [...]}`` where each ranking entry is
+        ``{rank, id, zoo, source, ic_mean, ic_std, ir, ic_positive_ratio,
+        ic_count}`` sorted best-IR first.
+    """
+    reg = registry if registry is not None else get_default_registry()
+    rows: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    for aid in alpha_ids:
+        try:
+            zoo = reg.get(aid).zoo
+        except Exception:  # noqa: BLE001 — unknown id is a normal skipped outcome
+            skipped.append({"id": aid, "reason": "unknown alpha id (not in registry)"})
+            continue
+        result = bench_runner._compute_single_alpha((aid, panel, return_df))
+        if "row" in result:
+            row = dict(result["row"])
+            row["zoo"] = zoo
+            row["source"] = "zoo"
+            rows.append(row)
+        else:
+            skipped.append(_normalise_skip(result.get("skip", {})))
+
+    custom = dict(custom_row)
+    custom.setdefault("zoo", "custom")
+    custom.setdefault("source", "py-alpha-lib")
+    rows.append(custom)
+
+    rows_sorted = sorted(rows, key=lambda r: _sort_value(r, "ir"), reverse=True)
+    ranking = [
+        {
+            "rank": rank,
+            "id": row.get("id"),
+            "zoo": row.get("zoo"),
+            "source": row.get("source"),
+            "ic_mean": row.get("ic_mean", 0.0),
+            "ic_std": row.get("ic_std", 0.0),
+            "ir": row.get("ir", 0.0),
+            "ic_positive_ratio": row.get("ic_positive_ratio", 0.0),
+            "ic_count": row.get("ic_count", 0),
+        }
+        for rank, row in enumerate(rows_sorted, start=1)
+    ]
+    return {"ranking": ranking, "skipped": skipped}
