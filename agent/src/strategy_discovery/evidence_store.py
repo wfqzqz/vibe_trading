@@ -40,6 +40,8 @@ _FLOAT_FIELDS = (
     "excess_in_regime",
     "sharpe_in_regime",
     "max_drawdown_in_regime",
+    "win_rate",
+    "payoff_ratio",
     "breakeven_fee_bps",
 )
 
@@ -54,6 +56,8 @@ CREATE TABLE IF NOT EXISTS strategy_regime_evidence (
     excess_in_regime       REAL,
     sharpe_in_regime       REAL,
     max_drawdown_in_regime REAL,
+    win_rate               REAL,
+    payoff_ratio           REAL,
     date_ranges            TEXT NOT NULL,
     breakeven_fee_bps      REAL,
     cost_sensitive         INTEGER NOT NULL DEFAULT 0,
@@ -80,6 +84,8 @@ _REQUIRED_COLUMNS = (
     "excess_in_regime",
     "sharpe_in_regime",
     "max_drawdown_in_regime",
+    "win_rate",
+    "payoff_ratio",
     "date_ranges",
     "breakeven_fee_bps",
     "cost_sensitive",
@@ -95,10 +101,10 @@ _INSERT_SQL = """
 INSERT OR REPLACE INTO strategy_regime_evidence (
     strategy_id, regime, trades_in_regime, position_size,
     return_in_regime, benchmark_in_regime, excess_in_regime,
-    sharpe_in_regime, max_drawdown_in_regime, date_ranges,
-    breakeven_fee_bps, cost_sensitive, evidence_quality, warnings,
-    last_verified, evidence_stage, provenance, regime_definition
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    sharpe_in_regime, max_drawdown_in_regime, win_rate, payoff_ratio,
+    date_ranges, breakeven_fee_bps, cost_sensitive, evidence_quality,
+    warnings, last_verified, evidence_stage, provenance, regime_definition
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -253,6 +259,8 @@ class EvidenceStore:
                         row.excess_in_regime,
                         row.sharpe_in_regime,
                         row.max_drawdown_in_regime,
+                        row.win_rate,
+                        row.payoff_ratio,
                         json.dumps(list(row.date_ranges), ensure_ascii=False),
                         row.breakeven_fee_bps,
                         1 if row.cost_sensitive else 0,
@@ -299,6 +307,8 @@ class EvidenceStore:
                         row.excess_in_regime,
                         row.sharpe_in_regime,
                         row.max_drawdown_in_regime,
+                        row.win_rate,
+                        row.payoff_ratio,
                         json.dumps(list(row.date_ranges), ensure_ascii=False),
                         row.breakeven_fee_bps,
                         1 if row.cost_sensitive else 0,
@@ -400,6 +410,8 @@ class EvidenceStore:
             excess_in_regime=record["excess_in_regime"],
             sharpe_in_regime=record["sharpe_in_regime"],
             max_drawdown_in_regime=record["max_drawdown_in_regime"],
+            win_rate=record["win_rate"],
+            payoff_ratio=record["payoff_ratio"],
             date_ranges=tuple(json.loads(record["date_ranges"] or "[]")),
             breakeven_fee_bps=record["breakeven_fee_bps"],
             cost_sensitive=bool(record["cost_sensitive"]),

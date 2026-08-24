@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -141,6 +142,16 @@ class EvidenceRow:
     excess_in_regime: float | None = None
     sharpe_in_regime: float | None = None
     max_drawdown_in_regime: float | None = None
+    #: Win rate from realized trade P&L (``wins / trades``), a decimal
+    #: fraction in ``[0, 1]``. Mirrors ``backtest/metrics.py::win_rate_and_stats``
+    #: so the evidence layer and the backtest summary report the same number.
+    #: ``None`` when the run's artifacts carried no usable per-trade P&L.
+    win_rate: float | None = None
+    #: Payoff ratio ``b = avg_win / avg_loss`` (``profit_loss_ratio`` in
+    #: ``win_rate_and_stats``), the second Kelly input. ``None`` when unknown;
+    #: ``0.0`` is the honest value when there are no wins or no losses, so an
+    #: all-win regime never fabricates an infinite or invented ratio.
+    payoff_ratio: float | None = None
     #: Each entry is "YYYY-MM to YYYY-MM". Kept as a tuple so the dataclass
     #: stays hashable / frozen-friendly.
     date_ranges: tuple[str, ...] = ()
@@ -412,6 +423,46 @@ def breakeven_fee_bps(
         return None
 
     return math.log(1.0 + gross) / (2.0 * n_trades * size) * 10_000.0
+
+
+def win_rate_and_payoff(pnls: Sequence[float]) -> tuple[float, float]:
+    """Win rate and payoff ratio from a sequence of realized P&L values.
+
+    Mirrors ``backtest/metrics.py::win_rate_and_stats`` exactly (its
+    ``win_rate`` and ``profit_loss_ratio`` outputs) so the evidence layer and
+    the backtest summary report the same numbers. Pure stdlib on purpose:
+    ``models`` must stay cheap to import (see the package ``__init__`` import
+    policy), so this re-derives the two formulas without pulling numpy/pandas.
+
+    Semantics (identical to ``win_rate_and_stats``):
+
+    * ``win_rate = count(pnl > 0) / len(pnls)`` — a decimal fraction in
+      ``[0, 1]``.
+    * ``payoff_ratio = avg_win / avg_loss`` where ``avg_win`` is the mean of
+      the positive P&Ls (``0.0`` when there are none) and ``avg_loss`` is the
+      absolute mean of the negative P&Ls (``1e-10`` sentinel when there are
+      none). The ratio is reported only when ``avg_loss > 1e-10``, so an
+      all-win or all-loss regime reports ``0.0`` — matching
+      ``win_rate_and_stats``'s rounded output rather than fabricating an
+      infinite ratio.
+
+    Args:
+        pnls: Realized P&L values, one per closed trade (finite floats).
+
+    Returns:
+        ``(win_rate, payoff_ratio)``. An empty sequence yields ``(0.0, 0.0)``,
+        the same degenerate result ``win_rate_and_stats`` returns for no
+        trades.
+    """
+    if not pnls:
+        return 0.0, 0.0
+    wins = [pnl for pnl in pnls if pnl > 0]
+    losses = [pnl for pnl in pnls if pnl < 0]
+    win_rate = len(wins) / len(pnls)
+    avg_win = sum(wins) / len(wins) if wins else 0.0
+    avg_loss = abs(sum(losses) / len(losses)) if losses else 1e-10
+    payoff_ratio = avg_win / avg_loss if avg_loss > 1e-10 else 0.0
+    return win_rate, round(payoff_ratio, 4)
 
 
 def build_warnings(

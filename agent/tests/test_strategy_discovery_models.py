@@ -75,6 +75,8 @@ class TestEvidenceRow:
         assert row.excess_in_regime is None
         assert row.sharpe_in_regime is None
         assert row.max_drawdown_in_regime is None
+        assert row.win_rate is None
+        assert row.payoff_ratio is None
         assert row.date_ranges == ()
         assert isinstance(row.date_ranges, tuple)
         assert row.breakeven_fee_bps is None
@@ -153,6 +155,8 @@ class TestEvidenceRow:
             excess_in_regime=0.15,
             sharpe_in_regime=0.9,
             max_drawdown_in_regime=-0.08,
+            win_rate=0.6,
+            payoff_ratio=2.5,
             date_ranges=("2019-03 to 2020-01",),
             breakeven_fee_bps=33.0,
             cost_sensitive=False,
@@ -161,6 +165,8 @@ class TestEvidenceRow:
             last_verified="2026-08-01",
         )
         assert row.sharpe_in_regime == 0.9
+        assert row.win_rate == 0.6
+        assert row.payoff_ratio == 2.5
         assert row.date_ranges == ("2019-03 to 2020-01",)
         assert row.warnings == ("w1",)
 
@@ -278,6 +284,39 @@ class TestBreakevenFeeBps:
         assert sd_models.breakeven_fee_bps(float("nan"), 10) is None
         assert sd_models.breakeven_fee_bps(float("inf"), 10) is None
         assert sd_models.breakeven_fee_bps(0.20, 10, float("nan")) is None
+
+
+@requires_models
+class TestWinRateAndPayoff:
+    """``win_rate_and_payoff`` mirrors ``backtest/metrics.py::win_rate_and_stats``."""
+
+    def test_mixed_wins_and_losses(self) -> None:
+        win_rate, payoff_ratio = sd_models.win_rate_and_payoff([100.0, -50.0, 200.0])
+        assert win_rate == pytest.approx(2 / 3)
+        # avg_win = (100 + 200) / 2 = 150; avg_loss = 50 → ratio 3.0.
+        assert payoff_ratio == pytest.approx(3.0)
+
+    def test_all_winners_payoff_is_zero_not_infinite(self) -> None:
+        win_rate, payoff_ratio = sd_models.win_rate_and_payoff([100.0, 200.0, 50.0])
+        assert win_rate == 1.0
+        # Mirrors win_rate_and_stats: no losses → sentinel avg_loss → 0.0.
+        assert payoff_ratio == 0.0
+
+    def test_all_losers(self) -> None:
+        win_rate, payoff_ratio = sd_models.win_rate_and_payoff([-100.0, -200.0])
+        assert win_rate == 0.0
+        assert payoff_ratio == 0.0
+
+    def test_empty_pnls(self) -> None:
+        win_rate, payoff_ratio = sd_models.win_rate_and_payoff([])
+        assert win_rate == 0.0
+        assert payoff_ratio == 0.0
+
+    def test_payoff_ratio_matches_win_rate_and_stats(self) -> None:
+        # Two wins (200, 300) and one loss (-100): ratio (250 / 100) = 2.5.
+        win_rate, payoff_ratio = sd_models.win_rate_and_payoff([200.0, 300.0, -100.0])
+        assert win_rate == pytest.approx(2 / 3)
+        assert payoff_ratio == pytest.approx(2.5)
 
 
 def _call_build_warnings(scenario: dict) -> tuple:
