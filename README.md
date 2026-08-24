@@ -758,6 +758,13 @@ vibe-trading-mcp               # start MCP server (stdio)
 | **C. MCP plugin** | Plug into your existing agent | 3 min |
 | **D. ClawHub** | One command, no cloning | 1 min |
 
+> **A-share deployment (QMT Bridge + factor runtime):** this fork adds a
+> Windows-only read-only QMT Bridge and the py-alpha-lib factor runtime. For the
+> local (Windows) and Docker dual-path setup — including the shared
+> `~/.vibe-trading/cache/loaders/miniqmt/` cache, credential layering
+> (LLM / data source / broker), and the factor-runtime graceful degradation —
+> see [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
 ### Prerequisites
 
 - An **LLM API key** from any supported provider — or run locally with **Ollama** (no key needed)

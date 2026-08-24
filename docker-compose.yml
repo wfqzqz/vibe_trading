@@ -13,12 +13,31 @@ services:
   vibe-trading:
     build: .
     ports:
-      - "127.0.0.1:8899:8899"
+      # Host bind port is .env-driven (root .env VIBE_WEB_PORT); the container
+      # side stays 8899 — the fixed EXPOSE/CMD contract of the image.
+      - "127.0.0.1:${VIBE_WEB_PORT:-8899}:8899"
     env_file:
       - agent/.env
     environment:
       - VIBE_TRADING_TRUST_DOCKER_LOOPBACK=1
       - VIBE_TW_STOCK_DB=/data/tw-stock/latest.db
+      # A-share miniQMT loader cache (DORA-124 §1.2 / P-03). The QMT Bridge on
+      # the Windows host writes ~/.vibe-trading/cache/loaders/miniqmt/; this
+      # container reads it at the same default loader-cache root (see the bind
+      # mount below). The opt-in cache is ON by default so the miniqmt loader
+      # serves the bridge's settled bars instead of falling through to free
+      # sources on every request.
+      - VIBE_TRADING_DATA_CACHE=${VIBE_TRADING_DATA_CACHE:-1}
+      - VIBE_TRADING_DATA_CACHE_ROOT=/home/vibe/.vibe-trading/cache/loaders
+      # Optional cold-read back to the QMT Bridge via the host gateway. The
+      # bridge binds 127.0.0.1 by default, so a container cold read only works
+      # when the bridge is also listening on the gateway (run it with
+      # QMT_BRIDGE_HOST=0.0.0.0 or the LAN IP) — the shared cache above is the
+      # primary path and needs no such change. QMT_BRIDGE_TOKEN is the loopback
+      # bearer token (empty = cache-only reads, cold read degrades).
+      - QMT_BRIDGE_HOST=${QMT_BRIDGE_HOST:-host.docker.internal}
+      - QMT_BRIDGE_PORT=${QMT_BRIDGE_PORT:-8100}
+      - QMT_BRIDGE_TOKEN=${QMT_BRIDGE_TOKEN:-}
       # Ollama runs on the host; from inside the container "localhost" is the
       # container itself, so default to reaching the host via host.docker.internal.
       # Override by exporting OLLAMA_BASE_URL (or setting it in a top-level .env)
@@ -45,9 +64,19 @@ services:
       # Published Taiwan stock snapshots, mounted read-only. The default host
       # path stays OUTSIDE the checkout: no market data may ever land in the
       # working tree. Compose does not expand "~" in volume paths, so this uses
-      # ${HOME}. Override VIBE_TW_STOCK_DATA_DIR in the root .env with another
-      # absolute path outside the repo.
-      - ${VIBE_TW_STOCK_DATA_DIR:-${HOME}/.vibe-trading/tw-stock}:/data/tw-stock:ro
+      # USERPROFILE (Windows) with a HOME fallback (Linux/macOS). Override
+      # VIBE_TW_STOCK_DATA_DIR in the root .env with another absolute path
+      # outside the repo.
+      - ${VIBE_TW_STOCK_DATA_DIR:-${USERPROFILE:-${HOME}}/.vibe-trading/tw-stock}:/data/tw-stock:ro
+      # Shared A-share loader cache (DORA-124 §1.2 / P-03): the QMT Bridge
+      # writes ~/.vibe-trading/cache/loaders/miniqmt/ on the Windows host, and
+      # the local Windows agent and this container read the SAME directory.
+      # Compose does not expand "~"; the default host side uses USERPROFILE
+      # (Windows) with a HOME fallback (Linux/macOS). Override
+      # VIBE_TRADING_DATA_CACHE_ROOT in the root .env to relocate the host side.
+      # Mounted rw (not ro) so a container cold read can also cache its result
+      # under the same content-addressed keys the bridge writes.
+      - ${VIBE_TRADING_DATA_CACHE_ROOT:-${USERPROFILE:-${HOME}}/.vibe-trading/cache/loaders}:/home/vibe/.vibe-trading/cache/loaders
     # --- Runtime hardening (VT-007) ---
     cap_drop:
       - ALL
@@ -80,7 +109,8 @@ services:
     image: node:22@sha256:5647be709086c696ff32edaaf1c70cd26d1da6ab2b39c32f3c7b4c4a31957e37  # node:22 digest resolved 2026-07-28
     working_dir: /app
     ports:
-      - "127.0.0.1:5899:5899"
+      # Host bind port is .env-driven (root .env VIBE_FRONTEND_PORT).
+      - "127.0.0.1:${VIBE_FRONTEND_PORT:-5899}:5899"
     volumes:
       - ./frontend:/app
     environment:
