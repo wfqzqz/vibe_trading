@@ -1,0 +1,98 @@
+# py-alpha-lib factor runtime — dependency compatibility assessment (F-01)
+
+> **Owner / purpose.** DORA-144 (F-01) deliverable; the durable record that
+> DORA-124 Stage 4 task **F-04** ("因子对账回归 + numpy≥2 兼容评估") reconciles
+> against. Everything below is traceable to pinned files: `requirements-lock.txt`,
+> `requirements-factor-lock.txt`, `pyproject.toml`, `Dockerfile`.
+
+## 1. Conclusion (TL;DR)
+
+| Question | Answer |
+| --- | --- |
+| Is `py-alpha-lib==0.3.0` compatible with `numpy>=2`? | **Yes — it requires it.** The wheel declares `Requires-Dist: numpy>=2` (Python `>=3.11`). |
+| Compatible with the upstream stack `pandas>=2,<3` / `bottleneck` / `scikit-learn`? | **Yes.** The base lock already pins `numpy==2.4.6`, `pandas==2.3.3`, `bottleneck==1.6.0`, `scikit-learn==1.9.0`, `scipy==1.17.1` — all numpy-2-native releases — and `py-alpha-lib` adds no new transitive constraints beyond `numpy>=2`. |
+| Any version conflict? | **None.** `py-alpha-lib`'s only dependency is `numpy>=2`, satisfied by the already-locked `numpy==2.4.6` (no second numpy, no pin change). |
+
+`py-alpha-lib` is a Rust/PyO3 extension built against the **abi3** stable ABI, so its
+native code does not re-enter numpy's C API at build time — the only runtime
+requirement is a numpy 2.x ABI at the Python level, which the base stack already
+ships.
+
+## 2. Wheel availability (why "container-only + graceful degradation")
+
+Verified against PyPI (`py-alpha-lib` 0.3.0 file list, 2026-08-24):
+
+| Platform | Wheel tag | Importable on |
+| --- | --- | --- |
+| Linux x86_64 | `cp311-abi3-manylinux_2_17_x86_64` | Python ≥ 3.11 (the Docker image is `python:3.11-slim`) |
+| Linux musl | `cp311-abi3-musllinux_1_2_x86_64` | Python ≥ 3.11 |
+| macOS arm64 | `cp311-abi3-macosx_11_0_arm64` | Python ≥ 3.11 |
+| **Windows x86_64** | **`cp314-abi3-win_amd64` only** | **Python ≥ 3.14 only** |
+| free-threaded | `cp314-cp314t` / `cp315-cp315t` | CPython 3.14t / 3.15t |
+
+**Consequence (the F-01 degradation contract).** The project's Windows host runs
+Python 3.11/3.12, for which py-alpha-lib publishes **no** Windows wheel (and no
+sdist install is expected — it needs the Rust toolchain). Therefore:
+
+- **Docker path (recommended for factor work):** the agent image installs
+  `requirements-factor-lock.txt` and `import alpha` succeeds (`cp311-abi3`).
+- **Local Windows path:** py-alpha-lib is *not* installed (it is an optional
+  `factor_runtime` extra, not a base dependency), so the base install stays lean.
+  The Alpha Zoo's ~460 preset factors are unaffected (they run on the pandas path
+  in `src.factors.registry.Registry.compute`); only the new-factor entry points
+  (`src.factor_runtime.runtime.FactorRuntime.register/compute/evaluate`) raise
+  `FactorRuntimeUnavailableError` with an actionable Docker hint.
+
+## 3. Empirical verification (isolated venv)
+
+Command (Python 3.14, the only local interpreter with a Windows py-alpha-lib wheel):
+
+```text
+python -m venv compat_venv
+compat_venv/Scripts/python -m pip install \
+    numpy==2.4.6 pandas==2.3.3 bottleneck==1.6.0 scikit-learn==1.9.0 py-alpha-lib==0.3.0
+compat_venv/Scripts/python compat_smoke.py
+```
+
+`compat_smoke.py` imports `numpy`/`pandas`/`bottleneck`/`sklearn`/`alpha` in the
+agent's real import order and checks:
+
+1. all five packages co-import with the pinned versions;
+2. `alpha.MA` returns the documented rolling-window values (both default
+   partial-warmup mode and `FLAG_STRICTLY_CYCLE` NaN-warmup mode), matching a
+   pandas/`rolling` reference.
+
+Result (isolated venv, Python 3.14.6 — the local interpreter with a Windows
+py-alpha-lib wheel):
+
+```text
+[ok] import numpy 2.4.6
+[ok] import pandas 2.3.3
+[ok] import bottleneck 1.6.0
+[ok] import scikit-learn 1.9.0
+[ok] py-alpha-lib dist version 0.3.0
+[ok] alpha.MA shape (6,)
+[ok] alpha.MA warmup values [1.  1.5]
+[ok] alpha.MA steady-state values [2. 3. 4. 5.]
+[ok] alpha.MA strict-cycle (NaN warmup) [nan nan  2.]
+----
+numpy=2.4.6 pandas=2.3.3 bottleneck=1.6.0 sklearn=1.9.0 py-alpha-lib=0.3.0
+FAILURES: 0
+```
+
+All five packages co-import at the pinned versions and `alpha.MA` matches the
+documented rolling-window semantics, so the `numpy>=2` conclusion is confirmed
+empirically, not just by metadata.
+
+## 4. Risk notes (handed to F-04)
+
+- **Re-verify on upgrade.** `requirements-factor-lock.txt` pins
+  `py-alpha-lib==0.3.0`; any bump must re-run the factor reconciliation
+  regression (F-04) against same-口径 Alpha Zoo factors before landing.
+- **Windows remains degraded by design** until py-alpha-lib ships a
+  `cp311-abi3`/`cp312-abi3` Windows wheel; do not "fix" this by building from
+  source in the base install (Rust toolchain + long builds) — the Docker path is
+  the supported route.
+- **numpy 2.x is the floor**, not a ceiling: `py-alpha-lib` requires `numpy>=2`,
+  so any future numpy 1.x downgrade of the base stack would break the runtime.
+  Keep the base lock at `numpy>=2`.

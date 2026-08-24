@@ -151,6 +151,14 @@ ashare = [
     # A-share loader needs no extra dependency (stdlib HTTP only).
     "baostock>=0.8.8",
 ]
+factor_runtime = [
+    # py-alpha-lib factor runtime (DORA-124 §3.4 module D / F-01). Container-only:
+    # ships a cp311-abi3-manylinux wheel on Linux (importable on Python 3.11+), but
+    # on Windows it only ships cp314-abi3 (Python 3.14+), so a stock Windows
+    # 3.11/3.12 install has no matching wheel and the runtime degrades gracefully
+    # (src.factor_runtime). Lazy-imported; never a base dependency.
+    "py-alpha-lib==0.3.0",
+]
 harmonic = [
     "pyharmonics>=1.5.0",
 ]

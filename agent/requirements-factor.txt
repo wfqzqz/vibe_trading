@@ -1,0 +1,17 @@
+# py-alpha-lib factor runtime — baked into the Docker image only.
+#
+# Mirrors the [factor_runtime] extra in pyproject.toml. It lives in its own lock
+# (like agent/requirements-channels.txt) rather than the base lock because it is
+# NOT installable on a bare Windows host (py-alpha-lib ships only a cp314-abi3
+# Windows wheel → Python 3.14+, while the base stack supports 3.11+). Keeping it
+# out of agent/requirements.txt lets a local Windows install stay lean and the
+# runtime degrade gracefully (src/factor_runtime) instead of failing the install.
+#
+# Regenerate the lock (Python 3.11, matching requirements-lock.txt) with:
+#
+#    uv pip compile --universal --python-version 3.11 --generate-hashes \
+#      --constraint requirements-lock.txt \
+#      --output-file=requirements-factor-lock.txt \
+#      agent/requirements-factor.txt
+#
+py-alpha-lib==0.3.0

@@ -45,6 +45,17 @@ RUN pip install --no-cache-dir --require-hashes -r requirements-lock.txt
 COPY requirements-channels-lock.txt requirements-channels-lock.txt
 RUN pip install --no-cache-dir --require-hashes -r requirements-channels-lock.txt
 
+# py-alpha-lib factor runtime (DORA-124 §3.4 module D / F-01) — container-only.
+# Installed from its own hash-pinned lock (same contract as the channel SDKs
+# above): it is deliberately NOT a base dependency because py-alpha-lib ships no
+# Windows wheel for Python 3.11/3.12, so a local Windows install degrades
+# gracefully (src/factor_runtime) instead of failing the base install. The lock
+# re-lists numpy==2.4.6 (already installed from requirements-lock.txt above) via
+# a constraint, so this only adds the py-alpha-lib wheel itself.
+COPY agent/requirements-factor.txt agent/requirements-factor.txt
+COPY requirements-factor-lock.txt requirements-factor-lock.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements-factor-lock.txt
+
 # Copy project + install the CLI entrypoint (editable — the runtime stage
 # re-creates the same /app/agent source tree the .pth file points at).
 # --no-deps because every dependency is already installed from the two locks

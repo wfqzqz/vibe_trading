@@ -1,3 +1,14 @@
+# ---------------------------------------------------------------------------
+# Service topology (DORA-124 §1.2, "agent + web + factor-runtime"):
+#   * `vibe-trading` below is the agent (FastAPI) and ALSO the factor-runtime
+#     host — the py-alpha-lib factor runtime (DORA-144 / F-01) is an IN-PROCESS
+#     module of the agent, not a separate service (DORA-124 rev v1.1 附带澄清 1).
+#     py-alpha-lib==0.3.0 is baked into this image by the Dockerfile, so the
+#     runtime is fully functional inside the container only.
+#   * `frontend` (profile-gated) is the dev Web server; the production image
+#     serves frontend/dist itself.
+# No `factor-runtime` service is declared on purpose: it is not a microservice.
+# ---------------------------------------------------------------------------
 services:
   vibe-trading:
     build: .
