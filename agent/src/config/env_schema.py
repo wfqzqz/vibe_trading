@@ -181,6 +181,13 @@ class DataConfig(_EnvBase):
     ccxt_fetch_budget_s: float = Field(alias="CCXT_FETCH_BUDGET_S", default=60.0)
     futu_host: str = Field(alias="FUTU_HOST", default="127.0.0.1")
     futu_port: int = Field(alias="FUTU_PORT", default=11111)
+    # QMT Bridge connection settings (DORA-225). Defaults mirror
+    # ``qmt_bridge.config`` (loopback only). ``qmt_bridge_token`` is optional:
+    # when the bridge pins its token in the DPAPI vault rather than the env, the
+    # miniqmt loader exposes it here so the cold-read path can authenticate.
+    qmt_bridge_host: str = Field(alias="QMT_BRIDGE_HOST", default="127.0.0.1")
+    qmt_bridge_port: int = Field(alias="QMT_BRIDGE_PORT", default=8100)
+    qmt_bridge_token: str = Field(alias="QMT_BRIDGE_TOKEN", default="")
     finnhub_api_key: str = Field(alias="FINNHUB_API_KEY", default="")
     alphavantage_api_key: str = Field(alias="ALPHAVANTAGE_API_KEY", default="")
     tiingo_api_key: str = Field(alias="TIINGO_API_KEY", default="")

@@ -19,7 +19,8 @@ this loader passes volume through unchanged and declares
 ``pre_close`` / ``limit_up`` / ``limit_down`` are qfq-relative (前复权基准) and are
 preserved verbatim for ``china_a.py`` to consume on that same 口径 (DORA-156 条件 2).
 
-Connection settings mirror the bridge's own env (``qmt_bridge.config``):
+Connection settings mirror the bridge's own env (``qmt_bridge.config``) and are
+read through the unified config layer (``DataConfig.qmt_bridge_*``):
 ``QMT_BRIDGE_HOST`` (default ``127.0.0.1``), ``QMT_BRIDGE_PORT`` (default 8100),
 ``QMT_BRIDGE_TOKEN`` (optional loopback bearer token; when the bridge pins its
 token in the DPAPI vault rather than the env, expose it here so the loader can
@@ -30,7 +31,6 @@ the cold-read path degrades).
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -47,9 +47,9 @@ from backtest.loaders.registry import register
 logger = logging.getLogger(__name__)
 
 # Bridge connection settings, mirroring ``qmt_bridge.config`` (loopback only).
-_HOST_ENV = "QMT_BRIDGE_HOST"
-_PORT_ENV = "QMT_BRIDGE_PORT"
-_TOKEN_ENV = "QMT_BRIDGE_TOKEN"
+# The values themselves are read through the unified config layer
+# (``agent/src/config/env_schema.py`` ``DataConfig.qmt_bridge_*``); these are
+# the last-line fallbacks when the config is empty.
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8100
 
@@ -80,26 +80,32 @@ _QUOTES_TIMEOUT_S = 30.0
 _HOST_KEY = "miniqmt"
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
+def _bridge_settings() -> tuple[str, int, str]:
+    """Return ``(host, port, token)`` from the unified config layer.
+
+    The values are read through :func:`src.config.accessor.get_env_config` —
+    the single place that touches ``os.environ`` (env-var gate) — with the
+    ``qmt_bridge.config`` defaults as a last-line fallback when the config
+    returns an empty value.
+    """
+    from src.config.accessor import get_env_config
+
+    data = get_env_config().data
+    host = (data.qmt_bridge_host or "").strip() or _DEFAULT_HOST
+    port = data.qmt_bridge_port or _DEFAULT_PORT
+    token = (data.qmt_bridge_token or "").strip()
+    return host, port, token
 
 
 def _bridge_base_url() -> str:
     """Return the bridge base URL (``http://host:port``), no trailing slash."""
-    host = os.getenv(_HOST_ENV, "").strip() or _DEFAULT_HOST
-    port = _env_int(_PORT_ENV, _DEFAULT_PORT)
+    host, port, _ = _bridge_settings()
     return f"http://{host}:{port}"
 
 
 def _bridge_token() -> str:
     """Return the loopback bearer token from the env (``""`` when unset)."""
-    return os.getenv(_TOKEN_ENV, "").strip()
+    return _bridge_settings()[2]
 
 
 def _auth_headers(token: str) -> Dict[str, str]:
