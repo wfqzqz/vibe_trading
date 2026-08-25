@@ -48,14 +48,18 @@ def test_daily_feed_error_degrades() -> None:
     assert result["reason"] == "feed down"
 
 
-def test_daily_writes_cache_when_final(
+def test_daily_does_not_cache_qfq_when_final(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Regression (DORA-177 + DORA-233): a forward-adjusted (qfq/hfq) series is a
+    # *moving anchor* re-calibrated after each corporate action, so even a fully
+    # elapsed past range is never a stable snapshot and must not be pinned —
+    # mirrors test_cache.test_range_is_final_never_for_forward_adjust.
     monkeypatch.setenv("VIBE_TRADING_DATA_CACHE", "1")
     service = BridgeService(FakeProvider(available=True), cache_root=str(tmp_path))
     service.daily("600519.SH", "2024-01-01", _yesterday(), "qfq")
     parquets = list(tmp_path.rglob("*.parquet"))
-    assert parquets, "expected a cache write for a settled qfq range"
+    assert not parquets, "a settled qfq range must never be written to cache (DORA-177)"
 
 
 def test_daily_does_not_cache_hfq(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

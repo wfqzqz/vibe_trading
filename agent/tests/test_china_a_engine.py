@@ -253,6 +253,9 @@ class TestPriceLimit:
             ("300750.SZ", 0.20),   # ChiNext
             ("688001.SH", 0.20),   # STAR Market
             ("830799.BJ", 0.30),   # Beijing
+            ("920003.BJ", 0.30),   # Beijing — new 92xxxx code (DORA-156 条件 3)
+            ("920003", 0.30),      # Beijing — suffix-less 92xxxx recognized
+            ("430047.BJ", 0.30),   # Beijing — 4xxxxx (NEEQ select)
         ],
     )
     def test_price_limits(self, symbol: str, expected: float) -> None:

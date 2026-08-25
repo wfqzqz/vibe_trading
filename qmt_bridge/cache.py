@@ -40,11 +40,13 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 #: Bump only in lockstep with ``backtest.loaders.base._LOADER_CACHE_VERSION``.
-#: v5: miniqmt volume normalized from shares to lots (DORA-156 条件 1).
 #: v6: key payload carries ``forward_adjust`` so forward-adjusted (qfq/hfq)
 #: payloads — a "moving anchor" that re-calibrates after each corporate action —
 #: are never matched to (or written from) a raw/unadjusted entry (DORA-177).
-LOADER_CACHE_VERSION = 6
+#: v7: miniqmt volume is NOT scaled — verified empirically that ``xtdata`` already
+#:     reports board lots, so the old ÷100 (DORA-156 条件 1 assumption) is removed
+#:     and any pre-v7 miniqmt entry must never be served again.
+LOADER_CACHE_VERSION = 7
 
 _LOADER_CACHE_ENV = "VIBE_TRADING_DATA_CACHE"
 _LOADER_CACHE_ROOT_ENV = "VIBE_TRADING_DATA_CACHE_ROOT"

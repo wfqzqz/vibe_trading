@@ -252,7 +252,11 @@ _LOADER_CACHE_TRUE_VALUES = {"1", "true", "yes", "on"}
 # v6: key payload carries ``forward_adjust`` so forward-adjusted (qfq/hfq)
 # payloads — a "moving anchor" that re-calibrates after each corporate action —
 # are never matched to (or written from) a raw/unadjusted entry (DORA-177).
-_LOADER_CACHE_VERSION = 6
+# v7: miniqmt (QMT Bridge) volume is NOT scaled — verified against a real
+# miniQMT terminal that ``xtdata`` already reports board lots, so the old
+# ÷100-to-lots assumption is removed (DORA-156 条件 1) and any pre-v7 miniqmt
+# entry must never be served.
+_LOADER_CACHE_VERSION = 7
 
 
 def loader_cache_enabled() -> bool:
