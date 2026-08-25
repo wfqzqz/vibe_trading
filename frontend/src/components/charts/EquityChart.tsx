@@ -19,6 +19,8 @@ export function EquityChart({ data, height = 300, drawdownZones }: Props) {
   useChartLifecycle(ref, () => {
     const t = getChartTheme();
     const zones = drawdownZones ?? [];
+    const seriesEquity = i18n.t("charts.seriesEquity");
+    const seriesDrawdown = i18n.t("charts.seriesDrawdown");
 
     const dates = data.map((d) => d.time);
     const equity = data.map((d) => Number(d.equity));
@@ -38,7 +40,7 @@ export function EquityChart({ data, height = 300, drawdownZones }: Props) {
           if (!Array.isArray(params) || !params.length) return "";
           let html = `<b>${escapeHtml(String(params[0].axisValue))}</b>`;
           for (const p of params) {
-            const val = p.seriesName === "Drawdown%"
+            const val = p.seriesName === seriesDrawdown
               ? `${p.value}%`
               : Number(p.value).toLocaleString();
             html += `<br/>${p.marker} ${p.seriesName}: <b>${val}</b>`;
@@ -48,13 +50,13 @@ export function EquityChart({ data, height = 300, drawdownZones }: Props) {
       },
       toolbox: {
         feature: {
-          saveAsImage: { title: "Save" },
-          restore: { title: "Reset" },
+          saveAsImage: { title: i18n.t("charts.toolboxSave") },
+          restore: { title: i18n.t("charts.toolboxReset") },
         },
         right: 8, top: 0,
         iconStyle: { borderColor: t.textColor },
       },
-      legend: { data: ["Equity", "Drawdown%"], textStyle: { color: t.textColor, fontSize: 11 }, right: 60, top: 4 },
+      legend: { data: [seriesEquity, seriesDrawdown], textStyle: { color: t.textColor, fontSize: 11 }, right: 60, top: 4 },
       grid: [
         { left: 8, right: 8, top: 36, height: "56%", containLabel: true },
         { left: 8, right: 8, top: "68%", height: "20%", containLabel: true },
@@ -78,7 +80,7 @@ export function EquityChart({ data, height = 300, drawdownZones }: Props) {
       dataZoom: [{ type: "inside", xAxisIndex: [0, 1] }],
       series: [
         {
-          name: "Equity", type: "line", xAxisIndex: 0, yAxisIndex: 0,
+          name: seriesEquity, type: "line", xAxisIndex: 0, yAxisIndex: 0,
           data: equity, smooth: false, symbol: "none",
           lineStyle: { color: t.infoColor, width: 2 },
           areaStyle: {
@@ -99,13 +101,13 @@ export function EquityChart({ data, height = 300, drawdownZones }: Props) {
           } : {}),
         },
         {
-          name: "Drawdown%", type: "line", xAxisIndex: 1, yAxisIndex: 1,
+          name: seriesDrawdown, type: "line", xAxisIndex: 1, yAxisIndex: 1,
           data: drawdown, smooth: false, symbol: "none",
           lineStyle: { color: t.downColor, width: 1 },
           areaStyle: { color: t.downColor + "25" },
           markLine: {
             silent: true, symbol: "none",
-            data: [{ yAxis: minDD, label: { formatter: `Max DD: ${minDD}%`, position: "insideEndTop", fontSize: 10, color: t.downColor } }],
+            data: [{ yAxis: minDD, label: { formatter: i18n.t("charts.maxDrawdownLabel", { value: minDD }), position: "insideEndTop", fontSize: 10, color: t.downColor } }],
             lineStyle: { color: t.downColor, type: "dashed", width: 1 },
           },
         },

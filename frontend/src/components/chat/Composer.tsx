@@ -34,11 +34,6 @@ import {
   LiveRuntimeStatus,
 } from "@/components/chat/LiveRuntimePanel";
 
-const CONNECTOR_CHECK_PROMPT =
-  "List my trading connector profiles, show which one is selected, then check that selected connector. If it is not ready, tell me exactly what setup step is missing. Do not place or modify orders.";
-const CONNECTOR_PORTFOLIO_PROMPT =
-  "Use the selected trading connector profile to summarize my account, positions, concentration, cash, and portfolio risk. Do not place or modify orders.";
-
 const ACCEPTED_FILE_TYPES =
   ".pdf,.docx,.xlsx,.xls,.pptx,.csv,.tsv,.txt,.md,.log,.json,.toml,.html,.xml,.rst,.png,.jpg,.jpeg,.gif,.bmp,.webp,.tiff";
 const MAX_ATTACHMENT_COUNT = 5;
@@ -184,7 +179,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
           toast.success(t("agent.uploaded", { filename: result.filename }));
         } catch (error) {
           toast.error(t("agent.uploadFailed", {
-            error: error instanceof Error ? error.message : "Unknown error",
+            error: error instanceof Error ? error.message : t("agent.unknownError"),
           }));
         }
       }
@@ -379,7 +374,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
                 role="menuitem"
                 onClick={() => {
                   setShowUploadMenu(false);
-                  submitPrompt(CONNECTOR_CHECK_PROMPT);
+                  submitPrompt(t("welcome.examples.checkConnectorPrompt"));
                 }}
                 className="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
               >
@@ -391,7 +386,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
                 role="menuitem"
                 onClick={() => {
                   setShowUploadMenu(false);
-                  submitPrompt(CONNECTOR_PORTFOLIO_PROMPT);
+                  submitPrompt(t("welcome.examples.analyzePortfolioPrompt"));
                 }}
                 className="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
               >

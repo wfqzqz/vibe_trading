@@ -93,7 +93,7 @@ export function CorrelationMatrix({ labels, matrix, height = 500 }: Props) {
       },
       series: [
         {
-          name: "Correlation",
+          name: i18n.t("charts.seriesCorrelation"),
           type: "heatmap",
           data,
           label: {

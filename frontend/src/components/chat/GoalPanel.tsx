@@ -83,7 +83,7 @@ export const GoalPanel = memo(function GoalPanel({
         goal_id: snapshot.goal.goal_id,
         expected_goal_id: snapshot.goal.goal_id,
         status: "cancelled",
-        recap: "Cancelled from Web UI.",
+        recap: t("agent.cancelledFromUI"),
       });
       onSnapshotChange(null);
       setDetailsOpen(false);

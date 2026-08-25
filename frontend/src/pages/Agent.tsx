@@ -975,7 +975,7 @@ export function Agent() {
           archiveActivity("failed");
         }
         clearStreamingView();
-        act().addMessage({ id: "", type: "error", content: String(d.error || "Execution failed"), timestamp: Date.now() });
+        act().addMessage({ id: "", type: "error", content: String(d.error || t("agent.executionFailed")), timestamp: Date.now() });
         act().setStatus("idle");
         scrollToBottom();
       },
@@ -1504,7 +1504,7 @@ export function Agent() {
 
   const handleStartSwarm = useCallback(() => {
     setGoalComposerActive(false);
-    setSwarmPreset({ name: "auto", title: "Agent Swarm" });
+    setSwarmPreset({ name: "auto", title: t("agent.agentSwarm") });
   }, []);
 
   const handleCancelSwarm = useCallback(() => {
@@ -1513,22 +1513,27 @@ export function Agent() {
 
   const handleExport = useCallback(() => {
     if (messages.length === 0) return;
-    const lines: string[] = [`# Chat Export`, ``, `Export time: ${new Date().toLocaleString()}`, ``];
+    const lines: string[] = [
+      `# ${t("agent.export.title")}`,
+      ``,
+      `${t("agent.export.time")}: ${new Date().toLocaleString()}`,
+      ``,
+    ];
     for (const msg of messages) {
       const time = new Date(msg.timestamp).toLocaleString();
       if (msg.type === "user") {
-        lines.push(`## User (${time})`, ``, msg.content, ``);
+        lines.push(`## ${t("agent.export.user")} (${time})`, ``, msg.content, ``);
       } else if (msg.type === "answer") {
-        lines.push(`## Assistant (${time})`, ``, msg.content, ``);
+        lines.push(`## ${t("agent.export.assistant")} (${time})`, ``, msg.content, ``);
       } else if (msg.type === "error") {
-        lines.push(`## Error (${time})`, ``, msg.content, ``);
+        lines.push(`## ${t("agent.export.error")} (${time})`, ``, msg.content, ``);
       } else if (msg.type === "tool_call") {
-        lines.push(`> Tool call: ${msg.tool || "unknown"}`, ``);
+        lines.push(`> ${t("agent.export.toolCall")}: ${msg.tool || t("agent.export.unknown")}`, ``);
       } else if (msg.type === "swarm_status") {
         const swarmStatus = msg.swarmRunId ? swarmRuns[msg.swarmRunId] : msg.swarmStatus;
-        lines.push(`> Swarm status: ${swarmStatus?.preset || "swarm"} ${swarmStatus?.status || ""}`, ``);
+        lines.push(`> ${t("agent.export.swarmStatus")}: ${swarmStatus?.preset || t("agent.export.unknown")} ${swarmStatus?.status || ""}`, ``);
       } else if (msg.type === "run_complete") {
-        lines.push(`> Backtest complete: ${msg.runId || ""}`, ``);
+        lines.push(`> ${t("agent.export.backtestComplete")}: ${msg.runId || ""}`, ``);
       }
     }
     const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
@@ -1538,7 +1543,7 @@ export function Agent() {
     a.download = `chat_${new Date().toISOString().slice(0, 10)}.md`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [messages, swarmRuns]);
+  }, [messages, swarmRuns, t]);
 
   const groups = useMemo(() => groupMessages(messages), [messages]);
   const hasCompletedTurn = useMemo(() => {

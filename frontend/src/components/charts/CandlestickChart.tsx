@@ -178,9 +178,9 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
     let subYAxis: any = { scale: true, gridIndex: 1, splitLine: { lineStyle: { color: t.gridColor } }, axisLabel: { color: t.textColor, fontSize: 10 } };
 
     if (sub === "vol") {
-      subSeries = [{ name: "Vol", type: "bar", data: vol, xAxisIndex: 1, yAxisIndex: 1 }];
+      subSeries = [{ name: i18n.t("charts.seriesVolume"), type: "bar", data: vol, xAxisIndex: 1, yAxisIndex: 1 }];
       subYAxis = { ...subYAxis, axisLabel: { ...subYAxis.axisLabel, formatter: (v: number) => abbreviateNum(v) } };
-      legendNames.push("Vol");
+      legendNames.push(i18n.t("charts.seriesVolume"));
     } else if (sub === "macd") {
       const m = indicatorCache.macd;
       subSeries = [
@@ -240,7 +240,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
         },
       },
       toolbox: {
-        feature: { saveAsImage: { title: "Save" }, dataZoom: { title: { zoom: "Zoom", back: "Reset" } }, restore: { title: "Reset" } },
+        feature: { saveAsImage: { title: i18n.t("charts.toolboxSave") }, dataZoom: { title: { zoom: i18n.t("charts.toolboxZoom"), back: i18n.t("charts.toolboxBack") } }, restore: { title: i18n.t("charts.toolboxReset") } },
         right: 8, top: 0, iconStyle: { borderColor: t.textColor },
       },
       legend: { data: legendNames, textStyle: { color: t.textColor, fontSize: 10 }, right: 80, top: 2, type: "scroll", itemWidth: 12, itemHeight: 8, itemGap: 8 },
