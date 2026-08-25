@@ -24,7 +24,7 @@ Verified against PyPI (`py-alpha-lib` 0.3.0 file list, 2026-08-24):
 
 | Platform | Wheel tag | Importable on |
 | --- | --- | --- |
-| Linux x86_64 | `cp311-abi3-manylinux_2_17_x86_64` | Python ≥ 3.11 (the Docker image is `python:3.11-slim`) |
+| Linux x86_64 | `cp311-abi3-manylinux_2_17_x86_64` | Python ≥ 3.12 (the Docker image is `python:3.14-slim` — 0.3.0's Python source uses PEP 695, DORA-251) |
 | Linux musl | `cp311-abi3-musllinux_1_2_x86_64` | Python ≥ 3.11 |
 | macOS arm64 | `cp311-abi3-macosx_11_0_arm64` | Python ≥ 3.11 |
 | **Windows x86_64** | **`cp314-abi3-win_amd64` only** | **Python ≥ 3.14 only** |
