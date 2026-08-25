@@ -249,7 +249,10 @@ _LOADER_CACHE_TRUE_VALUES = {"1", "true", "yes", "on"}
 # under the pre-normalization unit must never be served again.
 # v5: miniqmt (QMT Bridge) volume normalized from shares to lots (DORA-156
 # 条件 1) — any pre-normalization miniqmt cache must never be served.
-_LOADER_CACHE_VERSION = 5
+# v6: key payload carries ``forward_adjust`` so forward-adjusted (qfq/hfq)
+# payloads — a "moving anchor" that re-calibrates after each corporate action —
+# are never matched to (or written from) a raw/unadjusted entry (DORA-177).
+_LOADER_CACHE_VERSION = 6
 
 
 def loader_cache_enabled() -> bool:
@@ -293,6 +296,7 @@ def make_loader_cache_key(
     start_date: str,
     end_date: str,
     fields: list[str] | tuple[str, ...] | None = None,
+    forward_adjust: bool = False,
 ) -> str:
     """Build a stable content-addressed key for one loader payload."""
     payload = _loader_cache_payload(
@@ -302,6 +306,7 @@ def make_loader_cache_key(
         start_date=start_date,
         end_date=end_date,
         fields=fields,
+        forward_adjust=forward_adjust,
     )
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
@@ -315,6 +320,7 @@ def loader_cache_path(
     start_date: str,
     end_date: str,
     fields: list[str] | tuple[str, ...] | None = None,
+    forward_adjust: bool = False,
 ) -> Path:
     """Return the parquet cache path for one loader payload."""
     key = make_loader_cache_key(
@@ -324,19 +330,29 @@ def loader_cache_path(
         start_date=start_date,
         end_date=end_date,
         fields=fields,
+        forward_adjust=forward_adjust,
     )
     source_dir = _sanitize_cache_segment(source)
     return loader_cache_root() / source_dir / f"{key}.parquet"
 
 
-def loader_cache_range_is_final(end_date: str) -> bool:
+def loader_cache_range_is_final(end_date: str, *, forward_adjust: bool = False) -> bool:
     """Return whether ``end_date`` is settled enough to cache.
 
     The key is content-addressed on ``end_date`` but not on wall-clock fetch
     time, so caching a range whose last bar is still forming (``end_date`` today
     or in the future) would pin a provisional bar and serve it on every later
     run. Only fully-elapsed days (strictly before today) are cacheable.
+
+    ``forward_adjust`` (前复权/qfq, or 后复权/hfq) is never cacheable: a
+    forward-adjusted series is a *moving anchor*. When a new corporate action is
+    published, the provider re-calibrates the entire history, so a range that
+    ended in the past is not a stable snapshot of today's adjusted series. A
+    settled-date check alone would serve stale adjusted bars after a new
+    ex-date, so forward-adjusted payloads are always treated as not final.
     """
+    if forward_adjust:
+        return False
     try:
         end = pd.Timestamp(end_date).normalize().date()
     except Exception:  # noqa: BLE001 - an unparseable date is treated as not cacheable
@@ -352,14 +368,17 @@ def loader_cache_get(
     start_date: str,
     end_date: str,
     fields: list[str] | tuple[str, ...] | None = None,
+    forward_adjust: bool = False,
 ) -> pd.DataFrame | None:
     """Return a cached DataFrame for one payload, or ``None`` on any miss.
 
-    Misses include: cache disabled, range not yet settled, entry absent, or a
-    corrupt entry. A corrupt entry is non-fatal — the caller falls back to the
-    live provider.
+    Misses include: cache disabled, range not yet settled (any forward-adjusted
+    range), entry absent, or a corrupt entry. A corrupt entry is non-fatal —
+    the caller falls back to the live provider.
     """
-    if not loader_cache_enabled() or not loader_cache_range_is_final(end_date):
+    if not loader_cache_enabled() or not loader_cache_range_is_final(
+        end_date, forward_adjust=forward_adjust
+    ):
         return None
     cache_path = loader_cache_path(
         source=source,
@@ -368,6 +387,7 @@ def loader_cache_get(
         start_date=start_date,
         end_date=end_date,
         fields=fields,
+        forward_adjust=forward_adjust,
     )
     return _read_loader_cache_frame(cache_path)
 
@@ -381,13 +401,17 @@ def loader_cache_put(
     end_date: str,
     fields: list[str] | tuple[str, ...] | None,
     frame: pd.DataFrame | None,
+    forward_adjust: bool = False,
 ) -> None:
     """Write one non-empty DataFrame to the cache; a no-op when not cacheable.
 
-    Skips a disabled cache, an unsettled range, and empty/non-DataFrame results.
-    Write failures are swallowed so a fetch never fails because of the cache.
+    Skips a disabled cache, an unsettled range (including every forward-adjusted
+    range), and empty/non-DataFrame results. Write failures are swallowed so a
+    fetch never fails because of the cache.
     """
-    if not loader_cache_enabled() or not loader_cache_range_is_final(end_date):
+    if not loader_cache_enabled() or not loader_cache_range_is_final(
+        end_date, forward_adjust=forward_adjust
+    ):
         return
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         return
@@ -398,6 +422,7 @@ def loader_cache_put(
         start_date=start_date,
         end_date=end_date,
         fields=fields,
+        forward_adjust=forward_adjust,
     )
     _write_loader_cache_frame(cache_path, frame)
 
@@ -411,6 +436,7 @@ def cached_loader_fetch(
     end_date: str,
     fields: list[str] | tuple[str, ...] | None,
     fetch: Callable[[], pd.DataFrame | None],
+    forward_adjust: bool = False,
 ) -> pd.DataFrame | None:
     """Fetch one DataFrame through the opt-in local cache.
 
@@ -418,6 +444,11 @@ def cached_loader_fetch(
     for the common per-symbol loader loop: return the cached frame when present,
     otherwise call ``fetch`` and cache a non-empty result. Cache read/write
     failures are non-fatal and fall back to ``fetch``.
+
+    ``forward_adjust`` marks a payload whose series is forward-adjusted (qfq /
+    hfq) — a moving anchor that re-calibrates after each corporate action — so it
+    is never served from or written to the cache (see
+    :func:`loader_cache_range_is_final`).
     """
     cached = loader_cache_get(
         source=source,
@@ -426,6 +457,7 @@ def cached_loader_fetch(
         start_date=start_date,
         end_date=end_date,
         fields=fields,
+        forward_adjust=forward_adjust,
     )
     if cached is not None:
         return cached
@@ -439,6 +471,7 @@ def cached_loader_fetch(
         end_date=end_date,
         fields=fields,
         frame=frame,
+        forward_adjust=forward_adjust,
     )
     return frame
 
@@ -451,6 +484,7 @@ def _loader_cache_payload(
     start_date: str,
     end_date: str,
     fields: list[str] | tuple[str, ...] | None,
+    forward_adjust: bool = False,
 ) -> dict[str, object]:
     return {
         "version": _LOADER_CACHE_VERSION,
@@ -460,6 +494,7 @@ def _loader_cache_payload(
         "start_date": _normalize_cache_date(start_date),
         "end_date": _normalize_cache_date(end_date),
         "fields": [str(field) for field in (fields or ())],
+        "forward_adjust": bool(forward_adjust),
     }
 
 

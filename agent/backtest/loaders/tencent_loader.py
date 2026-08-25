@@ -100,6 +100,10 @@ class DataLoader:
                     start_date=start_date,
                     end_date=end_date,
                     fields=None,
+                    # Tencent's kline returns forward-adjusted (qfq) prices — a
+                    # moving anchor that re-calibrates after each ex-date, so it
+                    # must never be cached (DORA-177).
+                    forward_adjust=True,
                     fetch=lambda code=code: self._fetch_one(code, start_date, end_date),
                 )
                 if df is not None and not df.empty:

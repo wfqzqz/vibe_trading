@@ -103,6 +103,10 @@ class DataLoader:
                         start_date=start_date,
                         end_date=end_date,
                         fields=None,
+                        # BaoStock daily is fetched with adjustflag="2" (前复权).
+                        # Forward-adjusted prices are a moving anchor, so they are
+                        # never cached (DORA-177).
+                        forward_adjust=True,
                         fetch=lambda code=code: self._fetch_one(bs, code, start_date, end_date),
                     )
                     if df is not None and not df.empty:

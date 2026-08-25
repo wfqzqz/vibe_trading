@@ -138,6 +138,15 @@ _NO_NETWORK_FALLBACK_SOURCES: frozenset[str] = frozenset({"local", "qveris", "ti
 # data quality. Eastmoney/Sina/Stooq/Yahoo are unauthenticated public sources
 # that must be politely throttled; Finnhub/AlphaVantage/Tiingo/FMP are key-gated
 # REST fallbacks placed deeper in the chain.
+#
+# A-share note (DORA-177): eastmoney now precedes mootdx. mootdx's TCP-direct
+# quotes are only reachable from a environment with TDX egress, and its
+# minute/daily ``bars()``/``get_k_data`` paths can silently return empty; it also
+# pins ``httpx<0.26`` in setup.py, conflicting with the project's
+# ``httpx>=0.28``. eastmoney's HTTP kline reliably serves 1m/5m/15m/30m/1H with
+# verified board-lot volume, so it is the preferred minute fallback. mootdx is
+# retained as a late, dependency-fragile fallback rather than removed, so an
+# explicit ``source="mootdx"`` still works when TDX egress exists.
 FALLBACK_CHAINS: dict[str, list[str]] = {
     # miniqmt leads the A-share chain: it is the authoritative source (区间/
     # 复权/停牌/涨跌停元数据全), but reports unavailable when the bridge/cache
@@ -146,8 +155,10 @@ FALLBACK_CHAINS: dict[str, list[str]] = {
     # 内置) is the daily main chain *ahead of* tencent (无复权、仅作实时/无复权兜底),
     # so a daily request never serves tencent's unadjusted raw price over
     # baostock's qfq series. Minute requests skip the daily-only baostock/tencent
-    # via the interval filter in ``resolve_loader`` and land on mootdx/eastmoney.
-    "a_share":   ["miniqmt", "baostock", "tencent", "mootdx", "eastmoney", "akshare", "tushare", "local"],
+    # via the interval filter in ``resolve_loader``; within the free minute sources
+    # eastmoney leads mootdx because mootdx's ``bars()`` can silently return empty
+    # and it pins ``httpx<0.26`` in setup.py (DORA-177).
+    "a_share":   ["miniqmt", "baostock", "tencent", "eastmoney", "mootdx", "akshare", "tushare", "local"],
     "us_equity": ["yahoo", "stooq", "sina", "eastmoney", "yfinance", "tiingo", "fmp", "finnhub", "alphavantage", "longbridge", "akshare", "local"],
     # HK: tencent leads (no observed IP ban); akshare (Eastmoney-backed)
     # precedes the Yahoo-SDK family, which is blocked from mainland IPs;

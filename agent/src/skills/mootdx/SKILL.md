@@ -71,7 +71,7 @@ df_15m = client.bars(symbol="600519", frequency=1, offset=800)
 
 ## Built-in Loader
 
-`backtest/loaders/mootdx_loader.py` is registered as the `mootdx` source. Fallback chain for `a_share` is `[tushare, mootdx, akshare]` — tushare wins when a token is present; mootdx wins when no token but TCP egress works; akshare is the broadest fallback.
+`backtest/loaders/mootdx_loader.py` is registered as the `mootdx` source. The A-share fallback chain is `[miniqmt, baostock, tencent, eastmoney, mootdx, akshare, tushare, local]` — miniqmt leads (authoritative, unavailable when the bridge is down), baostock (前复权内置) precedes tencent (无复权兜底) for daily, and eastmoney leads mootdx because its HTTP kline reliably serves 1m/5m/15m/30m/1H with verified board-lot volume, whereas mootdx's `bars()`/`get_k_data` can silently return empty for minute requests and mootdx 0.11.7 pins `httpx<0.26` (DORA-177). mootdx is retained as a late fallback so an explicit `source="mootdx"` still works when TDX egress exists.
 
 ```python
 from backtest.runner import run

@@ -147,6 +147,10 @@ class DataLoader:
                     start_date=start_date,
                     end_date=end_date,
                     fields=None,
+                    # Mootdx returns 前复权 (forward-adjusted) prices by default.
+                    # Forward-adjusted series are a moving anchor re-calibrated on
+                    # every ex-date, so they are never cached (DORA-177).
+                    forward_adjust=True,
                     fetch=lambda code=code: self._fetch_one(code, start_date, end_date, interval),
                 )
                 if df is not None and not df.empty:

@@ -200,6 +200,11 @@ class DataLoader:
                 start_date=start_date,
                 end_date=end_date,
                 fields=cache_fields,
+                # Daily A-share/ETF/futures/fund bars are forward-adjusted via
+                # adj_factor (apply_qfq) — a moving anchor re-calibrated on every
+                # ex-date — so they must never be cached. Index and HK daily bars
+                # are raw (no adjustment series), so they stay cacheable (DORA-177).
+                forward_adjust=not (_is_index(code) or _is_hk_equity(code)),
                 fetch=_fetch_one,
             )
             if df is not None and not df.empty:

@@ -222,7 +222,7 @@ class TestFallbackChains:
         # chain then walks the free sources (DORA-124 §3.2). Daily free chain is
         # fixed by DORA-136 条件 2: baostock (前复权) ahead of tencent (无复权兜底).
         assert FALLBACK_CHAINS["a_share"] == [
-            "miniqmt", "baostock", "tencent", "mootdx", "eastmoney", "akshare", "tushare", "local",
+            "miniqmt", "baostock", "tencent", "eastmoney", "mootdx", "akshare", "tushare", "local",
         ]
         assert FALLBACK_CHAINS["us_equity"] == [
             "yahoo", "stooq", "sina", "eastmoney", "yfinance", "tiingo", "fmp",
@@ -243,6 +243,18 @@ class TestFallbackChains:
     def test_a_share_includes_baostock(self) -> None:
         """'baostock' must remain a reachable A-share fallback."""
         assert "baostock" in FALLBACK_CHAINS["a_share"]
+
+    def test_a_share_eastmoney_leads_mootdx_for_minute_fallback(self) -> None:
+        """Regression (DORA-177): mootdx daily/minute bars silently return empty
+        (get_k_data/bars -> None/empty) and mootdx 0.11.7 pins ``httpx<0.26``,
+        conflicting with the project's ``httpx>=0.28``. eastmoney's HTTP kline
+        reliably serves 1m/5m/15m/30m/1H with verified board-lot volume, so it
+        must precede mootdx in the A-share chain; mootdx is retained only as a
+        late, dependency-fragile fallback for an explicit ``source="mootdx"``."""
+        chain = FALLBACK_CHAINS["a_share"]
+        assert "eastmoney" in chain
+        assert "mootdx" in chain
+        assert chain.index("eastmoney") < chain.index("mootdx")
 
     def test_unchanged_chains_preserved(self) -> None:
         """crypto/futures/fund/macro/forex chains must be left untouched."""

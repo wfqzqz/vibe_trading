@@ -378,12 +378,75 @@ def test_loader_cache_corrupt_entry_falls_back_to_live_fetch(
     pd.testing.assert_frame_equal(out, frame)
 
 
-def test_tushare_daily_fetch_uses_opt_in_cache_for_bars_and_fields(
+def test_loader_cache_forward_adjust_never_caches(
     tmp_path,
     monkeypatch,
     fake_duckdb,
     loader_cache_root,
 ):
+    """Regression (DORA-177): a forward-adjusted payload is never read from or
+    written to the cache, even for a fully-settled past range. Simulate a
+    corporate action (the qfq "anchor" moves, re-calibrating the whole history)
+    by changing what the provider returns: the second fetch must hit the live
+    provider and return the NEW adjusted bars, never stale cached ones."""
+    monkeypatch.setenv(LOADER_CACHE_ENV, "1")
+    calls = {"count": 0}
+
+    def fetch():
+        calls["count"] += 1
+        # Anchor moves on call 2 to model a new ex-date after the first fetch.
+        return _cache_frame(value=float(calls["count"]))
+
+    kwargs = {
+        "source": "eastmoney",
+        "symbol": "600519.SH",
+        "timeframe": "1D",
+        "start_date": (dt.date.today() - dt.timedelta(days=30)).isoformat(),
+        "end_date": (dt.date.today() - dt.timedelta(days=2)).isoformat(),
+        "fields": None,
+        "forward_adjust": True,
+    }
+
+    first = cached_loader_fetch(**kwargs, fetch=fetch)
+    # Nothing may be written to disk for a forward-adjusted payload.
+    assert loader_cache_path(**kwargs).is_file() is False
+    assert not loader_cache_root.exists()
+
+    second = cached_loader_fetch(**kwargs, fetch=fetch)
+
+    # Both fetches hit the live provider: no stale adjusted bar is served.
+    assert calls["count"] == 2
+    assert first["close"].iloc[0] == 1.5     # anchor value at first fetch
+    assert second["close"].iloc[0] == 2.5    # re-calibrated after the ex-date
+    assert loader_cache_get(**kwargs) is None
+
+
+def test_loader_cache_key_partitions_on_forward_adjust():
+    """A forward-adjusted payload must never collide with a raw (unadjusted)
+    payload for the same symbol/date window."""
+    base_args = {
+        "source": "tencent",
+        "symbol": "600519.SH",
+        "timeframe": "1D",
+        "start_date": "2025-01-01",
+        "end_date": "2025-01-03",
+        "fields": None,
+    }
+    raw_key = make_loader_cache_key(**base_args, forward_adjust=False)
+    qfq_key = make_loader_cache_key(**base_args, forward_adjust=True)
+    assert raw_key != qfq_key
+
+
+def test_tushare_qfq_daily_fetch_never_caches(
+    tmp_path,
+    monkeypatch,
+    fake_duckdb,
+    loader_cache_root,
+):
+    """Regression (DORA-177): an A-share daily fetch is forward-adjusted (qfq) —
+    a moving anchor re-calibrated after each ex-date — so it must never be
+    served from or written to the opt-in cache. Two identical fetches both hit
+    the live provider, and no cache file is produced."""
     monkeypatch.setenv(LOADER_CACHE_ENV, "yes")
     monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
 
@@ -425,10 +488,13 @@ def test_tushare_daily_fetch_uses_opt_in_cache_for_bars_and_fields(
     first = loader.fetch(["000001.SZ"], "2025-01-01", "2025-01-03", fields=["pe"])
     second = loader.fetch(["000001.SZ"], "2025-01-01", "2025-01-03", fields=["pe"])
 
-    assert api.daily_calls == 1
-    assert api.daily_basic_calls == 1
+    # The provider is hit on both fetches — the qfq series is never cached.
+    assert api.daily_calls == 2
+    assert api.daily_basic_calls == 2
     pd.testing.assert_frame_equal(first["000001.SZ"], second["000001.SZ"])
     assert list(first["000001.SZ"].columns) == ["open", "high", "low", "close", "volume", "pe"]
+    # Nothing may be written for a forward-adjusted payload.
+    assert not loader_cache_root.exists()
 
 
 def test_loader_cache_range_is_final_only_for_settled_past():
@@ -441,6 +507,18 @@ def test_loader_cache_range_is_final_only_for_settled_past():
     assert loader_cache_range_is_final(tomorrow) is False
     # An unparseable end date is conservatively treated as not cacheable.
     assert loader_cache_range_is_final("not-a-date") is False
+
+
+def test_loader_cache_range_is_final_never_for_forward_adjust():
+    """Regression (DORA-177): a forward-adjusted (qfq/hfq) series is a moving
+    anchor — after a new corporate action the provider re-calibrates the whole
+    history — so even a fully-elapsed past range must never be treated as a
+    final, cacheable snapshot. Without this, a settled-date check returns stale
+    adjusted bars after the next ex-date."""
+    yesterday = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+    assert loader_cache_range_is_final(yesterday, forward_adjust=True) is False
+    # A long-settled range is still not final for a forward-adjusted payload.
+    assert loader_cache_range_is_final("2020-01-01", forward_adjust=True) is False
 
 
 def test_loader_cache_skips_unsettled_today_range(tmp_path, monkeypatch, loader_cache_root):

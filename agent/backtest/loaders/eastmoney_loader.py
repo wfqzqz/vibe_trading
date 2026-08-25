@@ -108,6 +108,10 @@ class DataLoader:
                     start_date=start_date,
                     end_date=end_date,
                     fields=None,
+                    # Eastmoney is fetched with fqt=1 (forward-adjusted) — a
+                    # moving anchor re-calibrated after every ex-date, so it must
+                    # never be cached (DORA-177).
+                    forward_adjust=True,
                     fetch=lambda code=code: self._fetch_one(
                         code, start_date, end_date, interval
                     ),

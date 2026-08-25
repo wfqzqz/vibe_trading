@@ -236,7 +236,9 @@ def test_registry_lists_mootdx_in_a_share_chain() -> None:
     chain = FALLBACK_CHAINS["a_share"]
     assert "mootdx" in chain
     # Order is by IP-ban risk: throttle-tolerant public/no-auth sources lead,
-    # key-gated REST trails. So mootdx (TCP, no auth) > akshare (HTTP scrape) >
-    # tushare (key-gated REST, placed last).
+    # key-gated REST trails. So eastmoney (HTTP, verified minute freqs) precedes
+    # mootdx (TCP, dependency-fragile, silent-empty minute data — DORA-177), and
+    # akshare (HTTP scrape) precedes tushare (key-gated REST, placed last).
+    assert chain.index("eastmoney") < chain.index("mootdx")
     assert chain.index("mootdx") < chain.index("akshare")
     assert chain.index("akshare") < chain.index("tushare")

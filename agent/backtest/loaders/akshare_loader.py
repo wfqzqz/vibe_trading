@@ -131,6 +131,13 @@ class DataLoader:
                     start_date=start_date,
                     end_date=end_date,
                     fields=None,
+                    # A-share / US / HK paths fetch with adjust="qfq" — a moving
+                    # anchor re-calibrated on every ex-date, so those payloads are
+                    # never cached. ETF prices also adjust on fund distributions.
+                    # Forex (raw, no adjust) stays cacheable (DORA-177).
+                    forward_adjust=(
+                        _is_a_share(code) or _is_us(code) or _is_hk(code)
+                    ),
                     fetch=lambda code=code: self._fetch_one(code, start_date, end_date, interval),
                 )
                 if df is not None and not df.empty:
