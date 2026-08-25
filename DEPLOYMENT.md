@@ -60,6 +60,15 @@ docker compose up --build                   # 构建并启动 agent（含前端�
 > 顶层的 `.env.example` 可复制为 `.env` 覆盖端口/缓存路径（见 §6）；不复制也能用
 > 默认值一键启动。
 
+> **构建代理说明（DORA-251）**：Docker Desktop 会自动向构建注入指向
+> `http.docker.internal:3128` 的 `HTTP(S)_PROXY` 构建参数；该代理对 PyPI
+> 间歇性故障——表现为构建时随机报 `Could not find a version ... (from
+> versions: none)`（python-telegram-bot / pycryptodome 先后中招；容器直连
+> PyPI 正常）。`docker-compose.yml` 已为 `vibe-trading` 服务固化空代理构建参数
+> （构建直连 PyPI），无需额外操作；若你的网络确实需经代理访问 PyPI，用
+> `docker compose build --build-arg HTTP_PROXY=<url> --build-arg HTTPS_PROXY=<url>`
+> 覆盖。仍偶遇上述报错时重跑一次构建即可（与锁文件无关，DORA-251 实证）。
+
 ### 3.2 验证
 
 ```powershell

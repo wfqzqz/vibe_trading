@@ -11,7 +11,21 @@
 # ---------------------------------------------------------------------------
 services:
   vibe-trading:
-    build: .
+    build:
+      context: .
+      # Docker Desktop injects HTTP(S)_PROXY build args pointing at
+      # http.docker.internal:3128; that proxy intermittently fails for PyPI
+      # ("Could not find a version ... (from versions: none)" on random
+      # packages, e.g. python-telegram-bot / pycryptodome; direct PyPI access
+      # works fine). Pin empty proxy args so image builds hit PyPI directly
+      # (DORA-251 follow-up). If your network needs a proxy for PyPI, override
+      # with `docker compose build --build-arg HTTP_PROXY=<url> ...`.
+      args:
+        HTTP_PROXY: ""
+        HTTPS_PROXY: ""
+        http_proxy: ""
+        https_proxy: ""
+        ALL_PROXY: ""
     ports:
       # Host bind port is .env-driven (root .env VIBE_WEB_PORT); the container
       # side stays 8899 — the fixed EXPOSE/CMD contract of the image.
