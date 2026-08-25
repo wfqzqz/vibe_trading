@@ -436,7 +436,9 @@
     "oauth": "OAuth",
     "authentication": "인증",
     "apiKey": "API 키",
-    "tushareTokenDesc": "중국 A주·선물·펀드·거시 데이터에 사용됩니다. 설정하지 않으면 가능한 경우 AKShare로 대체됩니다."
+    "tushareTokenDesc": "중국 A주·선물·펀드·거시 데이터에 사용됩니다. 설정하지 않으면 가능한 경우 AKShare로 대체됩니다.",
+    "modelTier": "모델 등급",
+    "modelTierDesc": "등급을 전환하면 에이전트가 사용하는 모델이 변경됩니다. flash는 더 빠르고 저렴하며, pro는 더 강력합니다. 아래에서 특정 모델을 선택하면 등급보다 우선합니다."
   },
   "qveris": {
     "title": "QVeris 도구 마켓플레이스",

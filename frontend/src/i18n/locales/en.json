@@ -380,6 +380,8 @@
     "modelDiscoveryApiKeyRequired": "Enter or save this provider's API key to load its available models.",
     "modelDiscoveryUnavailable": "The provider did not return a model list. You can still type an exact model ID.",
     "modelPickerHint": "Load provider choices or type an exact custom model ID.",
+    "modelTier": "Model Tier",
+    "modelTierDesc": "Switching the tier changes the model used by the agent. Flash is faster and cheaper; Pro is more capable. Choosing a specific model below takes precedence over the tier.",
     "clearApiKey": "Clear saved API key",
     "channels": {
       "title": "IM Channels",

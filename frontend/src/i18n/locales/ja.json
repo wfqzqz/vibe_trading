@@ -436,7 +436,9 @@
     "oauth": "OAuth",
     "authentication": "認証",
     "apiKey": "APIキー",
-    "tushareTokenDesc": "中国A株・先物・ファンド・マクロデータに使用します。未設定の場合、利用可能なところではAKShareにフォールバックします。"
+    "tushareTokenDesc": "中国A株・先物・ファンド・マクロデータに使用します。未設定の場合、利用可能なところではAKShareにフォールバックします。",
+    "modelTier": "モデルティア",
+    "modelTierDesc": "ティアを切り替えると、エージェントが使用するモデルが変わります。flash は高速で安価、pro は高機能です。下で特定のモデルを選ぶとティアより優先されます。"
   },
   "qveris": {
     "title": "QVeris ツールマーケットプレイス",

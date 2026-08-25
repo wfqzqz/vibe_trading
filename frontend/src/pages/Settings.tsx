@@ -10,6 +10,7 @@ import { getApiAuthKey, setApiAuthKey } from "@/lib/apiAuth";
 interface LLMFormState {
   provider: string;
   model_name: string;
+  model_tier: string;
   base_url: string;
   temperature: number;
   timeout_seconds: number;
@@ -26,12 +27,23 @@ function toForm(settings: LLMSettings): LLMFormState {
   return {
     provider: settings.provider,
     model_name: settings.model_name,
+    model_tier: settings.model_tier || "",
     base_url: settings.base_url,
     temperature: settings.temperature,
     timeout_seconds: settings.timeout_seconds,
     max_retries: settings.max_retries,
     reasoning_effort: settings.reasoning_effort || "",
   };
+}
+
+function defaultTierFor(provider?: LLMProviderOption): string {
+  if (!provider?.model_tiers || Object.keys(provider.model_tiers).length === 0) {
+    return "";
+  }
+  const match = Object.entries(provider.model_tiers).find(
+    ([, model]) => model === provider.default_model,
+  );
+  return match ? match[0] : Object.keys(provider.model_tiers)[0];
 }
 
 export function Settings() {
@@ -70,9 +82,13 @@ export function Settings() {
         if (llmResult.status === "fulfilled") {
           setSettings(llmResult.value);
           setForm(toForm(llmResult.value));
+          const activeProvider = llmResult.value.providers.find(
+            (provider) => provider.name === llmResult.value.provider,
+          );
           setModelOptions(Array.from(new Set([
             llmResult.value.model_name,
-            llmResult.value.providers.find((provider) => provider.name === llmResult.value.provider)?.default_model ?? "",
+            activeProvider?.default_model ?? "",
+            ...Object.values(activeProvider?.model_tiers ?? {}),
           ].filter(Boolean))));
         } else {
           const message = llmResult.reason instanceof Error
@@ -154,6 +170,7 @@ export function Settings() {
     setForm({
       ...form,
       model_name: provider.default_model,
+      model_tier: defaultTierFor(provider),
       base_url: provider.default_base_url,
     });
     setModelOptions([provider.default_model]);
@@ -167,12 +184,26 @@ export function Settings() {
       ...form,
       provider: provider.name,
       model_name: provider.default_model,
+      model_tier: defaultTierFor(provider),
       base_url: provider.default_base_url,
     });
     setApiKey("");
     setClearApiKey(false);
-    setModelOptions([provider.default_model]);
+    setModelOptions([...new Set([
+      provider.default_model,
+      ...Object.values(provider.model_tiers ?? {}),
+    ])].filter(Boolean));
     setModelListHint(null);
+  };
+
+  const onModelTierChange = (tier: string) => {
+    if (!form || !selectedProvider?.model_tiers) return;
+    const model = selectedProvider.model_tiers[tier] ?? form.model_name;
+    setForm({
+      ...form,
+      model_tier: tier,
+      model_name: model,
+    });
   };
 
   const refreshModels = async () => {
@@ -520,6 +551,30 @@ export function Settings() {
                 })}
               </span>
             </label>
+
+            {selectedProvider?.model_tiers && Object.keys(selectedProvider.model_tiers).length > 0 ? (
+              <label className="grid gap-2">
+                <span className={labelClass}>{t("settings.modelTier")}</span>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.entries(selectedProvider.model_tiers).map(([tier, model]) => (
+                    <button
+                      key={tier}
+                      type="button"
+                      onClick={() => onModelTierChange(tier)}
+                      className={`rounded-md border px-3 py-2 text-sm transition ${
+                        form.model_tier === tier
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <span className="font-medium capitalize">{tier}</span>
+                      <span className="block text-xs text-muted-foreground">{model}</span>
+                    </button>
+                  ))}
+                </div>
+                <span className={hintClass}>{t("settings.modelTierDesc")}</span>
+              </label>
+            ) : null}
 
             <label className="grid gap-2">
               <span className={labelClass}>{t("settings.model")}</span>

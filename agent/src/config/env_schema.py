@@ -138,6 +138,11 @@ class LLMConfig(_EnvBase):
 
     langchain_provider: str = Field(alias="LANGCHAIN_PROVIDER", default="openai")
     langchain_model_name: str = Field(alias="LANGCHAIN_MODEL_NAME", default="")
+    # Model-tier contract: a high-level tier label ("flash" | "pro") that
+    # resolves to a concrete model for providers that declare a ``model_tiers``
+    # map in llm_providers.json (DeepSeek). Defaults to the "pro" tier. An
+    # explicit LANGCHAIN_MODEL_NAME always wins over the tier resolution.
+    langchain_model_tier: str = Field(alias="LANGCHAIN_MODEL_TIER", default="pro")
     langchain_temperature: float = Field(alias="LANGCHAIN_TEMPERATURE", default=0.0)
     anthropic_max_tokens: int | None = Field(alias="ANTHROPIC_MAX_TOKENS", default=None, gt=0)
     timeout_seconds: int = Field(alias="TIMEOUT_SECONDS", default=120)

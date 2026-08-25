@@ -441,7 +441,9 @@
     "oauth": "OAuth",
     "authentication": "Authentifizierung",
     "apiKey": "API-Schlüssel",
-    "tushareTokenDesc": "Verwendet für China-A-Aktien, Futures, Fonds und Makrodaten. Falls nicht gesetzt, greift das Projekt auf AKShare zurück, sofern verfügbar."
+    "tushareTokenDesc": "Verwendet für China-A-Aktien, Futures, Fonds und Makrodaten. Falls nicht gesetzt, greift das Projekt auf AKShare zurück, sofern verfügbar.",
+    "modelTier": "Modell-Stufe",
+    "modelTierDesc": "Beim Wechseln der Stufe ändert sich das vom Agenten verwendete Modell. Flash ist schneller und günstiger; Pro ist leistungsfähiger. Die Auswahl eines bestimmten Modells unten hat Vorrang vor der Stufe."
   },
   "qveris": {
     "title": "QVeris-Tool-Marktplatz",

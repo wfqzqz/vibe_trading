@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.config.accessor import get_env_value, reset_env_config
+from src.providers.capabilities import resolve_effective_model
 
 # Agent root (agent/) — resolved from this file's location (agent/src/api/).
 _AGENT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -41,6 +42,10 @@ class LLMProviderOption(BaseModel):
     api_key_required: bool = True
     auth_type: str = "api_key"
     login_command: Optional[str] = None
+    # Optional model-tier contract: {tier_label: concrete_model_name}. Hosts
+    # that declare it (e.g. DeepSeek flash/pro) surface a tier selector in the
+    # Web Settings page.
+    model_tiers: Optional[Dict[str, str]] = None
 
 
 class LLMSettingsResponse(BaseModel):
@@ -48,6 +53,7 @@ class LLMSettingsResponse(BaseModel):
 
     provider: str
     model_name: str
+    model_tier: str
     base_url: str
     api_key_env: Optional[str] = None
     api_key_configured: bool
@@ -67,6 +73,7 @@ class UpdateLLMSettingsRequest(BaseModel):
 
     provider: str = Field(..., min_length=1)
     model_name: str = Field(..., min_length=1)
+    model_tier: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     clear_api_key: bool = False
@@ -362,9 +369,22 @@ def _build_llm_settings_response(
             authenticated, auth_status = False, ""
         api_key_configured = authenticated
         api_key_hint = auth_status if authenticated else None
+    # Model-tier contract: resolve the effective model so the UI always shows
+    # what the runtime will actually use. An explicit LANGCHAIN_MODEL_NAME wins;
+    # otherwise a declared tier maps to the concrete model (deepseek flash/pro).
+    model_tier = (
+        env_values.get("LANGCHAIN_MODEL_TIER")
+        or ("pro" if provider.model_tiers else "")
+    ).strip().lower()
+    effective_model = resolve_effective_model(
+        provider.name,
+        model_tier,
+        env_values.get("LANGCHAIN_MODEL_NAME", ""),
+    ) or env_values.get("LANGCHAIN_MODEL_NAME", provider.default_model)
     return LLMSettingsResponse(
         provider=provider.name,
-        model_name=env_values.get("LANGCHAIN_MODEL_NAME", provider.default_model),
+        model_name=effective_model,
+        model_tier=model_tier,
         base_url=env_values.get(provider.base_url_env, provider.default_base_url),
         api_key_env=provider.api_key_env,
         api_key_configured=api_key_configured,
@@ -556,6 +576,24 @@ def register_settings_routes(
                 ),
             )
 
+        # Model-tier contract: the provider catalog optionally declares a
+        # ``model_tiers`` map (e.g. DeepSeek flash/pro). A tiered provider
+        # validates the label and persists it (default "pro"); a provider
+        # without tiers clears any stale tier setting.
+        model_tier = (payload.model_tier or "").strip().lower()
+        if provider.model_tiers:
+            if model_tier and model_tier not in provider.model_tiers:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Model tier must be one of: "
+                        + ", ".join(sorted(provider.model_tiers))
+                    ),
+                )
+            model_tier = model_tier or "pro"
+        else:
+            model_tier = ""
+
         current_values = _read_settings_env_values()
         base_url = (
             payload.base_url if payload.base_url is not None else provider.default_base_url
@@ -572,6 +610,7 @@ def register_settings_routes(
         updates: Dict[str, str] = {
             "LANGCHAIN_PROVIDER": provider.name,
             "LANGCHAIN_MODEL_NAME": model_name,
+            "LANGCHAIN_MODEL_TIER": model_tier,
             provider.base_url_env: base_url,
             "LANGCHAIN_TEMPERATURE": str(payload.temperature),
             "TIMEOUT_SECONDS": str(payload.timeout_seconds),
