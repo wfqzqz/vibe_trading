@@ -93,7 +93,13 @@ class _ExplodingHTTPClient:
         return None
 
 
-def _oauth_provider(tmp_path, *, interactive: bool) -> OAuth:
+def _oauth_provider(
+    tmp_path,
+    *,
+    interactive: bool,
+    server_name: str = "robinhood",
+    url: str = "https://agent.robinhood.com/mcp/trading",
+) -> OAuth:
     """Build the OAuth provider an adapter would attach to its transport.
 
     Args:
@@ -108,7 +114,7 @@ def _oauth_provider(tmp_path, *, interactive: bool) -> OAuth:
     cfg = MCPServerConfig.model_validate(
         {
             "type": "streamableHttp",
-            "url": "https://agent.robinhood.com/mcp/trading",
+            "url": url,
             "auth": {
                 "type": "oauth",
                 "scopes": ["trading.read"],
@@ -118,7 +124,7 @@ def _oauth_provider(tmp_path, *, interactive: bool) -> OAuth:
             },
         }
     )
-    adapter = MCPServerAdapter("robinhood", cfg, interactive_oauth=interactive)
+    adapter = MCPServerAdapter(server_name, cfg, interactive_oauth=interactive)
     auth = adapter._build_client().transport.auth
     assert isinstance(auth, OAuth)
     return auth
@@ -135,6 +141,19 @@ def test_noninteractive_adapter_refuses_to_open_a_browser(tmp_path, monkeypatch)
 
     with pytest.raises(RuntimeError, match="connect/reconnect"):
         asyncio.run(auth.redirect_handler("https://agent.robinhood.com/oauth2/authorize?x=1"))
+
+
+def test_noninteractive_ibkr_adapter_refuses_to_open_a_browser(tmp_path) -> None:
+    auth = _oauth_provider(
+        tmp_path,
+        interactive=False,
+        server_name="ibkr",
+        url="https://api.ibkr.com/v1/api/mcp-public",
+    )
+    auth.httpx_client_factory = _ExplodingHTTPClient
+
+    with pytest.raises(RuntimeError, match="connect/reconnect"):
+        asyncio.run(auth.redirect_handler("https://api.ibkr.com/oauth2/authorize?x=1"))
 
 
 def test_interactive_adapter_keeps_default_browser_flow(tmp_path, monkeypatch) -> None:

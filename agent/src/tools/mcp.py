@@ -9,14 +9,17 @@ import logging
 import os
 import re
 import threading
-from collections.abc import Mapping
+import webbrowser
+from collections.abc import AsyncGenerator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, is_dataclass
 from typing import Any, Awaitable, Callable, Coroutine, Iterable, Protocol, TypeVar
+from urllib.parse import urlparse
 
 import httpx
 from fastmcp.client import Client
 from fastmcp.client.auth import OAuth
+from fastmcp.client.auth.oauth import ClientNotFoundError
 from fastmcp.client.client import CallToolResult
 try:
     from fastmcp.client.transports.http import StreamableHttpTransport
@@ -31,6 +34,7 @@ except ModuleNotFoundError:
 from fastmcp.exceptions import McpError, ToolError
 from key_value.aio.stores.filetree import FileTreeStore, FileTreeV1KeySanitizationStrategy
 from mcp import types as mcp_types
+from mcp.shared.auth import OAuthMetadata
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from src.agent.tools import BaseTool
@@ -137,6 +141,82 @@ class _GuardedOAuth(OAuth):
                 "OAuth authorization required; run the interactive connect/reconnect step"
             )
         await super().redirect_handler(authorization_url)
+
+
+class _IBKROAuth(_GuardedOAuth):
+    """Add the browser headers required by IBKR's OAuth WAF."""
+
+    async def _refresh_token(self) -> httpx.Request:
+        if self.context.oauth_metadata is None:
+            self.context.oauth_metadata = OAuthMetadata(
+                issuer="https://api.ibkr.com",
+                authorization_endpoint="https://api.ibkr.com/oauth2/authorize",
+                token_endpoint="https://api.ibkr.com/oauth2/api/v1/token",
+                registration_endpoint="https://api.ibkr.com/oauth2/register",
+            )
+        return await super()._refresh_token()
+
+    async def _initialize(self) -> None:
+        await super()._initialize()
+        client_info = self.context.client_info
+        registered_redirects = {
+            str(uri) for uri in (getattr(client_info, "redirect_uris", None) or [])
+        }
+        current_redirect = str(self.context.client_metadata.redirect_uris[0])
+        if (
+            client_info is not None
+            and self._static_client_info is None
+            and registered_redirects
+            and current_redirect not in registered_redirects
+        ):
+            await self.token_storage_adapter.clear()
+            self.context.client_info = None
+            self.context.current_tokens = None
+            self.context.token_expiry_time = None
+
+    async def async_auth_flow(
+        self, request: httpx.Request
+    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        flow = super().async_auth_flow(request)
+        response = None
+        try:
+            while True:
+                try:
+                    oauth_request = await flow.asend(response)
+                except StopAsyncIteration:
+                    break
+                if oauth_request.url.host == "api.ibkr.com":
+                    oauth_request.headers["User-Agent"] = "Mozilla/5.0"
+                    if not oauth_request.url.path.startswith("/v1/api/mcp"):
+                        oauth_request.headers["Accept"] = "application/json"
+                    if oauth_request.url.path == "/oauth2/register":
+                        oauth_request.headers["Origin"] = "https://api.ibkr.com"
+                response = yield oauth_request
+        finally:
+            await flow.aclose()
+
+    async def redirect_handler(self, authorization_url: str) -> None:
+        if not self._allow_interactive:
+            await super().redirect_handler(authorization_url)
+            return
+        async with self.httpx_client_factory() as client:
+            response = await client.get(
+                authorization_url,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/json",
+                },
+                follow_redirects=False,
+            )
+        if response.status_code == 400:
+            raise ClientNotFoundError(
+                "OAuth client not found - cached credentials may be stale"
+            )
+        if response.status_code not in (200, 301, 302, 303, 307, 308):
+            raise RuntimeError(
+                f"Unexpected authorization response: {response.status_code}"
+            )
+        webbrowser.open(authorization_url)
 
 
 def _make_cache_key(server_name: str, server_config: "MCPServerConfig") -> tuple[str, ...]:
@@ -617,11 +697,19 @@ class MCPServerAdapter:
                 # transport. Token cache is persistent (FileTreeStore), so the
                 # channel stays authorized across CLI invocations and refresh is
                 # handled inside the MCP lib's OAuthClientProvider.
-                auth = _GuardedOAuth(
+                is_ibkr = urlparse(self.server_config.url).hostname == "api.ibkr.com"
+                oauth_type = _IBKROAuth if is_ibkr else _GuardedOAuth
+                auth = oauth_type(
                     scopes=list(oauth_config.scopes) or None,
                     client_name=oauth_config.client_name,
                     token_storage=_build_token_store(oauth_config.cache_dir),
-                    callback_port=oauth_config.callback_port,
+                    additional_client_metadata=(
+                        {"token_endpoint_auth_method": "none"} if is_ibkr else None
+                    ),
+                    callback_port=(
+                        oauth_config.callback_port
+                        or (8765 if is_ibkr else None)
+                    ),
                     client_id=oauth_config.client_id,
                     client_secret=oauth_config.client_secret,
                     client_metadata_url=oauth_config.client_metadata_url,

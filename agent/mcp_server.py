@@ -79,7 +79,6 @@ from src.market_data import (
     DEFAULT_MAX_ROWS,
     cap_rows,
     detect_source,
-    fetch_market_data_json,
     get_loader,
 )
 
@@ -1765,15 +1764,22 @@ def get_market_data(
     of the returned rows ("lots" / "shares"; null = source undeclared) — read
     it before interpreting or comparing volume values across symbols/sources.
     """
-    return fetch_market_data_json(
-        codes=codes,
-        start_date=start_date,
-        end_date=end_date,
-        source=source,
-        interval=interval,
-        max_rows=max_rows,
-        loader_resolver=_get_loader,
-        include_provenance=True,
+    registry = _get_registry()
+    return registry.execute(
+        "get_market_data",
+        {
+            "codes": codes,
+            "start_date": start_date,
+            "end_date": end_date,
+            "source": source,
+            "interval": interval,
+            "max_rows": max_rows,
+            # Internal hook, not an agent-facing parameter: keeps the MCP
+            # surface resolving loaders through mcp_server._get_loader (the
+            # contract the regression tests and the server's own loader
+            # diagnostics rely on) instead of the tool's default resolver.
+            "loader_resolver": _get_loader,
+        },
     )
 
 

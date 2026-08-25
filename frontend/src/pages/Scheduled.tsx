@@ -269,6 +269,8 @@ export function Scheduled() {
         return { label: t("scheduled.statusRunning"), tone: "warning" };
       case "cancelled":
         return { label: t("scheduled.statusCancelled"), tone: "neutral" };
+      case "expired":
+        return { label: t("scheduled.statusExpired", { defaultValue: "Expired" }), tone: "neutral" };
       default:
         return { label: t("scheduled.statusPending"), tone: "neutral" };
     }
@@ -463,16 +465,27 @@ export function Scheduled() {
                 <li key={run.id} className="flex flex-wrap items-start gap-3 p-4">
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
+                      {run.title && <span className="font-semibold">{run.title}</span>}
                       <span className="font-medium">{cadenceLabel(run)}</span>
                       <span className={hintClass}>{zone}</span>
                       <StatusPill label={status.label} tone={status.tone} />
                     </div>
                     <p className="truncate text-sm text-muted-foreground">{run.prompt}</p>
                     <p className={hintClass}>
-                      {t("scheduled.nextRun", {
-                        when: formatInZone(run.next_run_at, zone, locale),
-                      })}
+                      {run.status === "expired"
+                        ? t("scheduled.noFurtherRuns", { defaultValue: "No further runs" })
+                        : t("scheduled.nextRun", {
+                            when: formatInZone(run.next_run_at, zone, locale),
+                          })}
                     </p>
+                    {run.end_at && (
+                      <p className={hintClass}>
+                        {t("scheduled.endsAt", {
+                          defaultValue: "Ends {{when}}",
+                          when: formatInZone(run.end_at, zone, locale),
+                        })}
+                      </p>
+                    )}
                     {run.last_error && (
                       <p className="break-words text-xs text-danger">
                         {t("scheduled.lastError", { error: run.last_error })}

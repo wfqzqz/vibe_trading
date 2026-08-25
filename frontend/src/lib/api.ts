@@ -383,6 +383,16 @@ export const api = {
     request<ScheduledRun>("/scheduled-runs", { method: "POST", body: JSON.stringify(body) }),
   deleteScheduledRun: (id: string) =>
     request<void>(`/scheduled-runs/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  commitScheduledResearchProposal: (proposalId: string) =>
+    request<ScheduledResearchProposal>(
+      `/scheduled-runs/proposals/${encodeURIComponent(proposalId)}/commit`,
+      { method: "POST" },
+    ),
+  discardScheduledResearchProposal: (proposalId: string) =>
+    request<ScheduledResearchProposal>(
+      `/scheduled-runs/proposals/${encodeURIComponent(proposalId)}/discard`,
+      { method: "POST" },
+    ),
   sendMessage: (sid: string, content: string) => request<{ message_id: string; attempt_id: string }>(`/sessions/${sid}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
   cancelSession: (sid: string) => request<{ status: string }>(`/sessions/${sid}/cancel`, { method: "POST" }),
   getSessionMessages: (sid: string) => request<MessageItem[]>(`/sessions/${sid}/messages`),
@@ -557,6 +567,10 @@ export interface VerdictRecord {
 export interface ScheduledRun {
   id: string;
   prompt: string;
+  title: string;
+  source_type: "prompt" | "playbook";
+  playbook_slug: string | null;
+  end_at: number | null;
   schedule: string;
   next_run_at: number;
   status: string;
@@ -571,9 +585,13 @@ export interface ScheduledRun {
   // app, which is what every monitor created before this did.
   delivery_channel: string | null;
   delivery_target: string | null;
+  delivery_target_ref: string | null;
+  delivery_target_label: string | null;
   delivery_status: string;
   delivery_error: string | null;
   delivery_updated_at: number | null;
+  delivery_attempts: number;
+  delivery_provider_message_id: string | null;
   // The latest run's parsed verdict, embedded with its predecessor so the list
   // renders a delta in one query. Null until a completed run records one.
   last_verdict: VerdictRecord | null;
@@ -581,12 +599,45 @@ export interface ScheduledRun {
 
 export interface CreateScheduledRunRequest {
   id?: string;
+  title?: string | null;
   prompt: string;
   schedule: string;
   timezone?: string | null;
+  end_at?: number | null;
   config?: Record<string, unknown>;
   delivery_channel?: string | null;
   delivery_target?: string | null;
+  delivery_target_ref?: string | null;
+}
+
+export interface ScheduledResearchProposalJob {
+  id: string;
+  title: string;
+  state: string;
+  source: { kind: string; playbook_slug?: string | null; prompt?: string | null };
+  schedule: {
+    expression: string;
+    timezone: string | null;
+    next_run_at: number | null;
+    end_at: number | null;
+  };
+  delivery: {
+    channel: string | null;
+    target_ref: string | null;
+    target_label: string | null;
+    status: string;
+  };
+}
+
+export interface ScheduledResearchProposal {
+  type: "scheduled_research.proposal";
+  proposal_id: string;
+  operation: "create" | "cancel";
+  status: "pending" | "committed" | "discarded" | "expired";
+  expires_at: number;
+  job: ScheduledResearchProposalJob;
+  job_id?: string | null;
+  committed_job_id?: string | null;
 }
 
 // --- Swarm types ---
