@@ -14,8 +14,9 @@ RUN npm run build
 # Stage 2: Python builder — compiles wheels + builds a self-contained venv.
 # build-essential lives ONLY here; it never reaches the runtime image.
 # ============================================================================
-FROM python:3.11-slim@sha256:e031123e3d85762b141ad1cbc56452ba69c6e722ebf2f042cc0dc86c47c0d8b3 AS builder
-# python:3.11-slim digest resolved 2026-07-13
+FROM python:3.14-slim@sha256:83ff1d245a3d57d04152252d3ef9cb361494d0b3395abd65a5ebe91c401c8e83 AS builder
+# python:3.14-slim digest resolved 2026-08-25 (DORA-251: py-alpha-lib 0.3.0
+# needs Python >= 3.12 — see the factor-runtime install below)
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -46,6 +47,11 @@ COPY requirements-channels-lock.txt requirements-channels-lock.txt
 RUN pip install --no-cache-dir --require-hashes -r requirements-channels-lock.txt
 
 # py-alpha-lib factor runtime (DORA-124 §3.4 module D / F-01) — container-only.
+# Needs Python >= 3.12 to import: 0.3.0's alpha/algo/algo_gen.py uses PEP 695
+# type-parameter syntax, which a 3.11 interpreter rejects with SyntaxError
+# (`import src.factor_runtime` → "expected '('"). The builder/runtime stages
+# therefore run python:3.14-slim (DORA-251); the cp311-abi3 manylinux wheel
+# installs and loads fine on 3.14.
 # Installed from its own hash-pinned lock (same contract as the channel SDKs
 # above): it is deliberately NOT a base dependency because py-alpha-lib ships no
 # Windows wheel for Python 3.11/3.12, so a local Windows install degrades
@@ -67,8 +73,8 @@ RUN pip install --no-cache-dir --no-deps -e .
 # ============================================================================
 # Stage 3: Runtime — carries the prebuilt venv only, no compilers/dev headers.
 # ============================================================================
-FROM python:3.11-slim@sha256:e031123e3d85762b141ad1cbc56452ba69c6e722ebf2f042cc0dc86c47c0d8b3 AS runtime
-# python:3.11-slim digest resolved 2026-07-13
+FROM python:3.14-slim@sha256:83ff1d245a3d57d04152252d3ef9cb361494d0b3395abd65a5ebe91c401c8e83 AS runtime
+# python:3.14-slim digest resolved 2026-08-25 (DORA-251 — see builder stage)
 
 LABEL org.opencontainers.image.title="Vibe-Trading" \
     org.opencontainers.image.description="Natural-language finance research AI agent with backtesting" \
