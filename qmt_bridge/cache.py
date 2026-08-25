@@ -41,7 +41,10 @@ logger = logging.getLogger(__name__)
 
 #: Bump only in lockstep with ``backtest.loaders.base._LOADER_CACHE_VERSION``.
 #: v5: miniqmt volume normalized from shares to lots (DORA-156 条件 1).
-LOADER_CACHE_VERSION = 5
+#: v6: key payload carries ``forward_adjust`` so forward-adjusted (qfq/hfq)
+#: payloads — a "moving anchor" that re-calibrates after each corporate action —
+#: are never matched to (or written from) a raw/unadjusted entry (DORA-177).
+LOADER_CACHE_VERSION = 6
 
 _LOADER_CACHE_ENV = "VIBE_TRADING_DATA_CACHE"
 _LOADER_CACHE_ROOT_ENV = "VIBE_TRADING_DATA_CACHE_ROOT"
@@ -79,6 +82,7 @@ def _loader_cache_payload(
     start_date: str,
     end_date: str,
     fields: Sequence[str] | None,
+    forward_adjust: bool = False,
 ) -> dict[str, object]:
     return {
         "version": LOADER_CACHE_VERSION,
@@ -88,6 +92,7 @@ def _loader_cache_payload(
         "start_date": _normalize_cache_date(start_date),
         "end_date": _normalize_cache_date(end_date),
         "fields": [str(field) for field in (fields or ())],
+        "forward_adjust": bool(forward_adjust),
     }
 
 
@@ -110,6 +115,7 @@ def make_loader_cache_key(
     start_date: str,
     end_date: str,
     fields: Sequence[str] | None = None,
+    forward_adjust: bool = False,
 ) -> str:
     """Build the stable content-addressed cache key (byte-identical to base.py)."""
     payload = _loader_cache_payload(
@@ -119,6 +125,7 @@ def make_loader_cache_key(
         start_date=start_date,
         end_date=end_date,
         fields=fields,
+        forward_adjust=forward_adjust,
     )
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
@@ -132,6 +139,7 @@ def loader_cache_path(
     start_date: str,
     end_date: str,
     fields: Sequence[str] | None = None,
+    forward_adjust: bool = False,
     cache_root: str | None = None,
 ) -> Path:
     """Return the parquet cache path for one payload (byte-identical to base.py)."""
@@ -142,17 +150,24 @@ def loader_cache_path(
         start_date=start_date,
         end_date=end_date,
         fields=fields,
+        forward_adjust=forward_adjust,
     )
     source_dir = _sanitize_cache_segment(source)
     return loader_cache_root(cache_root) / source_dir / f"{key}.parquet"
 
 
-def range_is_final(end_date: str) -> bool:
+def range_is_final(end_date: str, *, forward_adjust: bool = False) -> bool:
     """Return whether ``end_date`` is settled enough to cache.
 
     Mirrors ``base.py``: only ranges whose last bar has fully elapsed (strictly
     before today) are cacheable, so a forming day is never pinned and re-served.
+    ``forward_adjust`` (前复权/qfq, or 后复权/hfq) is never cacheable: a
+    forward-adjusted series is a *moving anchor* re-calibrated after each
+    corporate action, so even a fully-elapsed past range is not a stable
+    snapshot and must not be pinned (DORA-177).
     """
+    if forward_adjust:
+        return False
     try:
         end = pd.Timestamp(end_date).normalize().date()
     except Exception:  # noqa: BLE001 - unparseable dates are simply not cacheable
@@ -169,14 +184,19 @@ def write_frame(
     end_date: str,
     fields: Sequence[str] | None,
     frame: pd.DataFrame | None,
+    forward_adjust: bool = False,
     cache_root: str | None = None,
     extra_metadata: Mapping[str, object] | None = None,
 ) -> bool:
     """Write one non-empty DataFrame to the cache; ``False`` when not cacheable.
 
-    Skips a disabled cache, an unsettled range, and empty/non-DataFrame results.
-    Write failures are swallowed (logged) so a fetch never fails because of the
-    cache — the same contract as ``base.py.loader_cache_put``.
+    Skips a disabled cache, an unsettled range (including every forward-adjusted
+    range), and empty/non-DataFrame results. Write failures are swallowed
+    (logged) so a fetch never fails because of the cache — the same contract as
+    ``base.py.loader_cache_put``.
+
+    ``forward_adjust`` marks a forward-adjusted (qfq/hfq) series — a moving
+    anchor that is never cacheable (see :func:`range_is_final`).
 
     ``extra_metadata`` is merged into the JSON metadata sidecar (e.g. the
     ``adjust`` 口径). The agent's reader ignores unknown sidecar keys, so these
@@ -185,7 +205,7 @@ def write_frame(
     Returns:
         ``True`` when a frame was actually written, ``False`` otherwise.
     """
-    if not cache_enabled() or not range_is_final(end_date):
+    if not cache_enabled() or not range_is_final(end_date, forward_adjust=forward_adjust):
         return False
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         return False
@@ -196,6 +216,7 @@ def write_frame(
         start_date=start_date,
         end_date=end_date,
         fields=fields,
+        forward_adjust=forward_adjust,
         cache_root=cache_root,
     )
     return _write_frame(cache_path, frame, extra_metadata=extra_metadata)

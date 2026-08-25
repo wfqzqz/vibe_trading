@@ -57,6 +57,25 @@ def test_key_normalizes_dates_identically() -> None:
     )
 
 
+def test_key_partitions_on_forward_adjust() -> None:
+    # A forward-adjusted (qfq/hfq) payload must never collide with a raw
+    # (unadjusted) payload for the same symbol/date window — and the bridge key
+    # must stay byte-identical to base.py for both 口径. Regression (DORA-177).
+    kwargs = dict(
+        source="miniqmt", symbol="600519.SH", timeframe="1d",
+        start_date="2024-01-02", end_date="2024-01-31", fields=None,
+    )
+    raw_key = bridge_cache.make_loader_cache_key(**kwargs, forward_adjust=False)
+    qfq_key = bridge_cache.make_loader_cache_key(**kwargs, forward_adjust=True)
+    assert raw_key != qfq_key
+    assert raw_key == agent_key(**kwargs, forward_adjust=False)
+    assert qfq_key == agent_key(**kwargs, forward_adjust=True)
+    # The unadjusted key must match the default (no explicit flag) derivation,
+    # which is what the miniqmt loader reads with at runtime.
+    raw_default = bridge_cache.make_loader_cache_key(**kwargs)
+    assert raw_default == raw_key
+
+
 def test_path_layout_matches_convention(tmp_path: Path) -> None:
     key = bridge_cache.make_loader_cache_key(
         source="miniqmt", symbol="600519.SH", timeframe="1d",
@@ -79,6 +98,17 @@ def test_range_is_final_settled_only() -> None:
     assert bridge_cache.range_is_final(today) is False
     assert bridge_cache.range_is_final(future) is False
     assert bridge_cache.range_is_final("not-a-date") is False
+
+
+def test_range_is_final_never_for_forward_adjust() -> None:
+    # Regression (DORA-177): a forward-adjusted (qfq/hfq) series is a moving
+    # anchor — after a new corporate action the provider re-calibrates the whole
+    # history — so even a fully-elapsed past range must never be treated as a
+    # final, cacheable snapshot. This mirrors base.py's
+    # test_loader_cache_range_is_final_never_for_forward_adjust.
+    yesterday = (pd.Timestamp.today().normalize() - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    assert bridge_cache.range_is_final(yesterday, forward_adjust=True) is False
+    assert bridge_cache.range_is_final("2020-01-01", forward_adjust=True) is False
 
 
 def test_write_disabled_returns_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
