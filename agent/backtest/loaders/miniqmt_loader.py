@@ -13,11 +13,12 @@ that cache with a cold-read fallback to the bridge's read-only HTTP surface:
   (same content-addressed key the bridge writes, ``source="miniqmt"``,
   ``fields=None``); on a cache miss it cold-reads the bridge over HTTP.
 
-The bridge normalizes volume to board lots (1 lot = 100 shares) at ingestion, so
-this loader passes volume through unchanged and declares
-``volume_units={"a_share": "lots"}`` (DORA-124 D-04 门禁 1). The metadata columns
-``pre_close`` / ``limit_up`` / ``limit_down`` are qfq-relative (前复权基准) and are
-preserved verbatim for ``china_a.py`` to consume on that same 口径 (DORA-156 条件 2).
+``xtdata`` reports A-share volume in board lots (1 lot = 100 shares) — verified
+empirically against a miniQMT terminal (DORA-156 条件 1) — so this loader passes
+volume through unchanged and declares ``volume_units={"a_share": "lots"}``
+(DORA-124 D-04 门禁 1). The metadata columns``pre_close`` / ``limit_up`` /
+``limit_down`` are qfq-relative (前复权基准) and are preserved verbatim for
+``china_a.py`` to consume on that same 口径 (DORA-156 条件 2).
 
 Connection settings mirror the bridge's own env (``qmt_bridge.config``) and are
 read through the unified config layer (``DataConfig.qmt_bridge_*``):
@@ -187,9 +188,10 @@ class DataLoader:
     intervals = {"1d", "1m", "5m", "15m", "30m", "60m", "tick"}
     #: The bridge encrypts its own credentials; the loader holds none.
     requires_auth = False
-    #: The bridge normalizes volume to board lots at ingestion (1 lot = 100
-    #: shares), so the served unit is ``"lots"`` — the canonical A-share unit
-    #: shared with tencent/eastmoney/baostock/akshare/mootdx/tushare (#1062).
+    #: ``xtdata`` reports A-share volume in board lots already (verified, DORA-156
+    #: 条件 1), so no scaling is applied by the bridge — the served unit is
+    #: ``"lots"``, the canonical A-share unit shared with tencent/eastmoney/
+    #: baostock/akshare/mootdx/tushare (#1062). One lot = 100 shares.
     volume_units = {"a_share": "lots"}
 
     def __init__(self) -> None:

@@ -175,18 +175,20 @@ def _price_limit(symbol: str) -> float:
     """Determine price limit based on board.
 
     Args:
-        symbol: Stock code (e.g. 300001.SZ, 688001.SH, 000001.SZ).
+        symbol: Stock code (e.g. 300001.SZ, 688001.SH, 000001.SZ, 920xxx.BJ).
 
     Returns:
-        Limit as fraction (0.10, 0.20, or 0.05).
+        Limit as fraction (0.10, 0.20, 0.30, or 0.05).
     """
     code = symbol.split(".")[0] if "." in symbol else symbol
+    # Beijing exchange: ±30% — matched by the ``.BJ`` venue suffix (the reliable
+    # signal, covers the new ``920xxx`` block) or the ``92xxxx`` / ``8xxxxx`` /
+    # ``4xxxxx`` code ranges. The old ``startswith("8")`` heuristic missed
+    # ``920xxx.BJ`` and priced it at ±10% (DORA-156 条件 2 / 条件 3).
+    if symbol.upper().endswith(".BJ") or code.startswith(("43", "40", "8", "92")):
+        return 0.30
     # ChiNext (300xxx) / STAR (688xxx): ±20%
     if code.startswith("300") or code.startswith("688"):
         return 0.20
     # ST stocks: ±5% (heuristic: can't fully detect from code alone)
-    # Beijing exchange (8xxxxx): ±30% — simplified to 0.30
-    if code.startswith("8") and len(code) == 6:
-        return 0.30
-    # Main board: ±10%
     return 0.10

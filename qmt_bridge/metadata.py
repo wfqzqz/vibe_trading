@@ -46,6 +46,29 @@ def _board_code(symbol: str) -> str:
     return code
 
 
+def _is_bj(symbol: str) -> bool:
+    """Return whether ``symbol`` trades on the Beijing Stock Exchange (北交所).
+
+    The reliable signal is the ``.BJ`` venue suffix (real bridge symbols always
+    carry it — ``920xxx.BJ``, ``830799.BJ``). Beijing-exchange codes also include
+    the new ``92xxxx`` block and the older ``8xxxxx`` / ``4xxxxx`` (NEEQ select)
+    blocks, so a suffix-less code is recognized by those ranges too. The old
+    code-only ``startswith("8")`` heuristic silently missed ``920xxx.BJ`` and
+    priced it at ±10% (DORA-156 条件 3).
+    """
+    norm = normalize_symbol(symbol)
+    if norm.endswith(".BJ"):
+        return True
+    code = _board_code(norm)
+    if len(code) != 6:
+        return False
+    # Beijing exchange code ranges: ``8xxxxx``, the new ``92xxxx`` block, and the
+    # older ``4xxxxx`` (NEEQ select). Matches ``china_a._price_limit`` (DORA-156
+    # 条件 2 / 条件 3), so the bridge's precomputed band and the engine's band
+    # always agree for a Beijing symbol.
+    return code.startswith(("43", "40", "8", "92"))
+
+
 def price_limit_ratio(symbol: str) -> float:
     """Return the daily price-limit band as a fraction, mirroring ``china_a.py``.
 
@@ -54,15 +77,16 @@ def price_limit_ratio(symbol: str) -> float:
 
     Returns:
         ``0.20`` for ChiNext (300xxx) / STAR (688xxx), ``0.30`` for Beijing
-        (8xxxxx), ``0.05`` for ST (best-effort, see below), else ``0.10``.
+        (``.BJ``, 92xxxx / 8xxxxx), ``0.05`` for ST (best-effort, see below),
+        else ``0.10``.
     """
-    code = _board_code(symbol)
+    code = _board_code(normalize_symbol(symbol))
+    # Beijing exchange: ±30% (DORA-156 条件 3 — covers 920xxx.BJ / 8xxxxx / 4xxxxx).
+    if _is_bj(symbol):
+        return 0.30
     # ChiNext (300xxx) / STAR (688xxx): ±20%
     if code.startswith("300") or code.startswith("688"):
         return 0.20
-    # Beijing exchange (8xxxxx): ±30% — simplified.
-    if code.startswith("8") and len(code) == 6:
-        return 0.30
     # ST stocks trade ±5%: cannot be reliably detected from the code alone, so
     # this is a best-effort default the engine already mirrors (china_a.py).
     return 0.10

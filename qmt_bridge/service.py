@@ -205,6 +205,9 @@ class BridgeService:
             fields=None,
             frame=frame,
             cache_root=self._cache_root,
+            # A forward-adjusted (qfq/hfq) payload is a "moving anchor" and is keyed
+            # so it never collides with — nor is served as — a raw entry (DORA-177).
+            forward_adjust=adjust != "none",
             extra_metadata={"adjust": adjust, "source": SOURCE_NAME},
         )
 
