@@ -335,6 +335,96 @@ def _provider_default_base_url(provider_name: str) -> str:
     return _provider_default_base_urls().get((provider_name or "").strip().lower(), "")
 
 
+@lru_cache(maxsize=1)
+def _provider_model_tiers() -> dict[str, dict[str, str]]:
+    """Canonical ``name -> {tier: model}`` map from the provider catalog.
+
+    ``llm_providers.json`` declares an optional ``model_tiers`` object per
+    provider (e.g. DeepSeek's ``{"flash": "deepseek-v4-flash",
+    "pro": "deepseek-v4-pro"}``). This is the single data-driven source for the
+    model-tier contract: Web Settings renders the tier selector from it, and the
+    CLI/``.env`` path resolves the effective model from it. Keys are normalized
+    to lowercase so ``FLASH`` / ``Pro`` resolve identically.
+    """
+    try:
+        raw = json.loads(_PROVIDER_CATALOG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    entries = raw if isinstance(raw, list) else raw.get("providers", [])
+    result: dict[str, dict[str, str]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip().lower()
+        tiers = entry.get("model_tiers")
+        if not isinstance(tiers, dict):
+            continue
+        clean = {
+            str(key).strip().lower(): str(value).strip()
+            for key, value in tiers.items()
+            if str(value).strip()
+        }
+        if name and clean:
+            result[name] = clean
+    return result
+
+
+def provider_model_tiers(provider: str | None) -> dict[str, str]:
+    """Return the ``{tier: model}`` mapping declared for a provider.
+
+    A provider that does not declare tiers (the common case) returns an empty
+    mapping, so callers can treat tier support as absent without special-casing.
+    """
+    return _provider_model_tiers().get((provider or "").strip().lower(), {})
+
+
+def resolve_model_tier(provider: str | None, tier: str | None) -> str | None:
+    """Resolve a model-tier label to its concrete model for a provider.
+
+    Args:
+        provider: Canonical provider name (e.g. ``"deepseek"``).
+        tier: Model-tier label (e.g. ``"flash"`` / ``"pro"``).
+
+    Returns:
+        The concrete model name, or ``None`` when the provider declares no
+        ``model_tiers`` or the tier is unknown / empty.
+    """
+    tiers = provider_model_tiers(provider)
+    key = (tier or "").strip().lower()
+    if key and key in tiers:
+        return tiers[key]
+    return None
+
+
+def resolve_effective_model(
+    provider: str | None,
+    tier: str | None,
+    configured_model: str | None,
+) -> str | None:
+    """Resolve the effective model name for a provider under the tier contract.
+
+    Precedence (highest first):
+
+    1. An explicit ``configured_model`` (``LANGCHAIN_MODEL_NAME``) wins — a user
+       who pinned a concrete model keeps it, and tier changes only drive the
+       Web-Settings path where the concrete name is derived and persisted.
+    2. A resolvable ``tier`` maps to a concrete model (DeepSeek flash/pro).
+    3. ``None`` — the caller falls back to the provider default model.
+
+    Args:
+        provider: Canonical provider name.
+        tier: Model-tier label (e.g. ``"flash"`` / ``"pro"``).
+        configured_model: Explicitly configured model name, may be empty.
+
+    Returns:
+        The effective model name, or ``None`` when nothing is resolvable.
+    """
+    explicit = (configured_model or "").strip()
+    if explicit:
+        return explicit
+    return resolve_model_tier(provider, tier)
+
+
 def get_llm_credentials(
     provider: str | None,
     model: str | None,

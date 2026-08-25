@@ -619,11 +619,13 @@ export interface LLMProviderOption {
   api_key_required: boolean;
   auth_type?: string;
   login_command?: string | null;
+  model_tiers?: Record<string, string> | null;
 }
 
 export interface LLMSettings {
   provider: string;
   model_name: string;
+  model_tier: string;
   base_url: string;
   api_key_env?: string | null;
   api_key_configured: boolean;
@@ -641,6 +643,7 @@ export interface LLMSettings {
 export interface UpdateLLMSettingsRequest {
   provider: string;
   model_name: string;
+  model_tier?: string;
   base_url: string;
   api_key?: string;
   clear_api_key?: boolean;

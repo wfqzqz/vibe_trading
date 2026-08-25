@@ -441,7 +441,9 @@
     "oauth": "OAuth",
     "authentication": "Autenticación",
     "apiKey": "Clave de API",
-    "tushareTokenDesc": "Usado para datos de acciones A, futuros, fondos y macro de China. Si no se configura, el proyecto recurre a AKShare cuando está disponible."
+    "tushareTokenDesc": "Usado para datos de acciones A, futuros, fondos y macro de China. Si no se configura, el proyecto recurre a AKShare cuando está disponible.",
+    "modelTier": "Nivel del modelo",
+    "modelTierDesc": "Cambiar el nivel cambia el modelo que usa el agente. Flash es más rápido y barato; Pro es más capaz. Elegir un modelo específico a continuación tiene prioridad sobre el nivel."
   },
   "qveris": {
     "title": "Mercado de herramientas QVeris",

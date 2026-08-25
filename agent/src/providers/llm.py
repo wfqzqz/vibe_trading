@@ -21,6 +21,7 @@ from src.providers.capabilities import (
     ProviderCapabilities,
     get_llm_credentials,
     get_provider_capabilities,
+    resolve_effective_model,
 )
 
 try:
@@ -763,6 +764,19 @@ def _deepseek_adapter_mode() -> str:
     return aliases.get(mode, mode or "auto")
 
 
+def _resolve_effective_model(*, provider: str, model_name: str) -> str:
+    """Resolve the effective model name from the configured provider and tier.
+
+    Applies the model-tier contract (``LANGCHAIN_MODEL_TIER`` → concrete model)
+    for the provider when no explicit model is configured. An explicit
+    ``LANGCHAIN_MODEL_NAME`` always wins. Returns an empty string when nothing
+    resolves, so callers can fall back to the provider default or raise.
+    """
+    cfg = get_env_config().llm
+    resolved = resolve_effective_model(provider, cfg.langchain_model_tier, model_name)
+    return resolved or ""
+
+
 def _build_native_deepseek(
     *,
     model: str,
@@ -1116,7 +1130,13 @@ def _sync_provider_env() -> None:
         os.environ.pop("OPENAI_API_KEY", None)
         return
 
-    creds = get_llm_credentials(provider, get_env_config().llm.langchain_model_name)
+    creds = get_llm_credentials(
+        provider,
+        _resolve_effective_model(
+            provider=provider,
+            model_name=get_env_config().llm.langchain_model_name,
+        ),
+    )
     api_key = creds["api_key"]
     base_url = creds["base_url"]
 
@@ -1219,7 +1239,10 @@ def provider_diagnostics() -> dict[str, Any]:
     """
     _sync_provider_env()
     provider = get_env_config().llm.langchain_provider.strip().lower()
-    model = get_env_config().llm.langchain_model_name.strip()
+    model = _resolve_effective_model(
+        provider=provider,
+        model_name=get_env_config().llm.langchain_model_name,
+    )
     caps = get_provider_capabilities(provider, model)
     key_env = caps.api_key_env
     creds = get_llm_credentials(provider, model)
@@ -1270,6 +1293,7 @@ def provider_diagnostics() -> dict[str, Any]:
     return {
         "provider": caps.name if provider in {"kimi", "openai_codex"} else provider,
         "model": model,
+        "model_tier": get_env_config().llm.langchain_model_tier.strip().lower(),
         "base_url": _redact_base_url_for_log(base_url),
         "api_key": {key_env: _redact_env_flag(key_env)} if key_env else {},
         "http_header_env": {
@@ -1338,14 +1362,20 @@ def build_llm(*, model_name: Optional[str] = None, callbacks: Any = None) -> Any
         Provider-specific LangChain chat model.
 
     Raises:
-        RuntimeError: If langchain-openai is missing or LANGCHAIN_MODEL_NAME is unset.
+        RuntimeError: If langchain-openai is missing or no model resolves
+            (LANGCHAIN_MODEL_NAME unset and the model-tier contract yields
+            nothing for the provider).
     """
     _sync_provider_env()
-    name = model_name or get_env_config().llm.langchain_model_name.strip()
+    provider = get_env_config().llm.langchain_provider.lower()
+    name = (model_name or get_env_config().llm.langchain_model_name.strip()).strip()
+    if not name:
+        # Model-tier contract: derive the concrete model from LANGCHAIN_MODEL_TIER
+        # (e.g. "flash" -> deepseek-v4-flash) when the provider declares tiers.
+        name = _resolve_effective_model(provider=provider, model_name="")
     if not name:
         raise RuntimeError("LANGCHAIN_MODEL_NAME is not set")
     temperature = get_env_config().llm.langchain_temperature
-    provider = get_env_config().llm.langchain_provider.lower()
     caps = get_provider_capabilities(provider, name)
     if provider in {"openai-codex", "openai_codex"}:
         from src.providers.openai_codex import OpenAICodexLLM

@@ -375,6 +375,8 @@
     "modelDiscoveryApiKeyRequired": "请输入或保存此提供商的 API 密钥以加载可用模型。",
     "modelDiscoveryUnavailable": "提供商未返回模型列表。你仍可输入准确的模型 ID。",
     "modelPickerHint": "加载提供商的模型选项，或直接输入准确的自定义模型 ID。",
+    "modelTier": "模型档位",
+    "modelTierDesc": "切换档位会改变智能体实际使用的模型。flash 更快更省钱，pro 能力更强；下方选择具体模型可覆盖档位。",
     "clearApiKey": "清除已保存的 API 密钥",
     "channels": {
       "title": "IM 通道",

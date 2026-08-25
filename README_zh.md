@@ -833,6 +833,7 @@ skill + MCP config 会下载到你的智能体 skills 目录。详情见 [ClawHu
 | `<PROVIDER>_API_KEY` | Yes* | API key（`OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY` 等） |
 | `<PROVIDER>_BASE_URL` | Yes | API endpoint URL |
 | `LANGCHAIN_MODEL_NAME` | Yes | 模型名称（例如 `deepseek-v4-pro`） |
+| `LANGCHAIN_MODEL_TIER` | No | DeepSeek 档位：`flash`（快、省钱）或 `pro`（强，默认）。解析到具体模型（`flash`→`deepseek-v4-flash`、`pro`→`deepseek-v4-pro`）；显式 `LANGCHAIN_MODEL_NAME` 优先 |
 | `TUSHARE_TOKEN` | No | A 股数据的 Tushare Pro token（会 fallback 到 AKShare） |
 | `TIMEOUT_SECONDS` | No | LLM 调用超时，默认 120s |
 | `API_AUTH_KEY` | 网络部署推荐 | API 可被非本地客户端访问时要求的 Bearer token |
