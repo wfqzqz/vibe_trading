@@ -71,9 +71,9 @@ function formatCountdown(iso: string | undefined): { label: string; expired: boo
 function summarizeLimits(limits: LiveMandateLimits | undefined): string {
   if (!limits) return "";
   const parts: string[] = [];
-  if (limits.max_order_notional_usd != null) parts.push(`≤${formatUsd(limits.max_order_notional_usd)}/order`);
-  if (limits.max_trades_per_day != null) parts.push(`${limits.max_trades_per_day}/day`);
-  if (limits.max_leverage != null) parts.push(limits.max_leverage <= 1 ? "no leverage" : `${limits.max_leverage}×`);
+  if (limits.max_order_notional_usd != null) parts.push(i18n.t("mandate.maxPerOrder", { amount: formatUsd(limits.max_order_notional_usd) }));
+  if (limits.max_trades_per_day != null) parts.push(i18n.t("mandate.tradesPerDay", { count: limits.max_trades_per_day }));
+  if (limits.max_leverage != null) parts.push(limits.max_leverage <= 1 ? i18n.t("mandate.noLeverage") : i18n.t("mandate.leverageValue", { value: limits.max_leverage }));
   return parts.join(" · ");
 }
 

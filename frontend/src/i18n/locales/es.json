@@ -5,7 +5,16 @@
   "charts": {
     "noPriceData": "Aún no hay datos de precio para este símbolo",
     "noCorrelationData": "Elige al menos dos símbolos para comparar",
-    "noEquityData": "Aún no hay curva de valor de cuenta — ejecuta primero un backtest"
+    "noEquityData": "Aún no hay curva de valor de cuenta — ejecuta primero un backtest",
+    "toolboxSave": "Guardar",
+    "toolboxReset": "Restablecer",
+    "toolboxZoom": "Zoom",
+    "toolboxBack": "Atrás",
+    "seriesEquity": "Patrimonio",
+    "seriesDrawdown": "Drawdown",
+    "seriesCorrelation": "Correlación",
+    "seriesVolume": "Volumen",
+    "maxDrawdownLabel": "DD máx.: {{value}}%"
   },
   "layout": {
     "home": "Inicio",
@@ -519,6 +528,8 @@
     "checkConnector": "Verificar conector",
     "analyzePortfolio": "Analizar portafolio del conector",
     "executionTimedOut": "Se agotó el tiempo de ejecución, detenido automáticamente",
+    "executionFailed": "La ejecución falló",
+    "unknownError": "Error desconocido",
     "researchGoalAttached": "Objetivo de investigación asociado",
     "failedToStartGoal": "Error al iniciar el objetivo.",
     "researchGoalCancelled": "Objetivo de investigación cancelado",
@@ -579,7 +590,18 @@
     "resumeConnector": "Reanudar conector",
     "resumeConnectorTitle": "Desactivar el interruptor de emergencia y reanudar la actividad del conector",
     "connectorResumed": "Conector reanudado",
-    "failedToResumeConnector": "Error al reanudar el conector."
+    "failedToResumeConnector": "Error al reanudar el conector.",
+    "export": {
+      "title": "Exportar chat",
+      "time": "Hora de exportación",
+      "user": "Usuario",
+      "assistant": "Asistente",
+      "error": "Error",
+      "toolCall": "Llamada de herramienta",
+      "swarmStatus": "Estado de Swarm",
+      "backtestComplete": "Backtest completo",
+      "unknown": "desconocido"
+    }
   },
   "runDetail": {
     "title": "Detalle de ejecución",

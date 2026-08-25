@@ -5,7 +5,16 @@
   "charts": {
     "noPriceData": "Noch keine Kursdaten für dieses Symbol",
     "noCorrelationData": "Wählen Sie mindestens zwei Symbole zum Vergleichen",
-    "noEquityData": "Noch keine Kontowert-Kurve — führen Sie zuerst einen Backtest durch"
+    "noEquityData": "Noch keine Kontowert-Kurve — führen Sie zuerst einen Backtest durch",
+    "toolboxSave": "Speichern",
+    "toolboxReset": "Zurücksetzen",
+    "toolboxZoom": "Zoom",
+    "toolboxBack": "Zurück",
+    "seriesEquity": "Eigenkapital",
+    "seriesDrawdown": "Drawdown",
+    "seriesCorrelation": "Korrelation",
+    "seriesVolume": "Volumen",
+    "maxDrawdownLabel": "Max. DD: {{value}}%"
   },
   "layout": {
     "home": "Startseite",
@@ -519,6 +528,8 @@
     "checkConnector": "Connector prüfen",
     "analyzePortfolio": "Connector-Portfolio analysieren",
     "executionTimedOut": "Ausführung zeitüberschritten, automatisch gestoppt",
+    "executionFailed": "Ausführung fehlgeschlagen",
+    "unknownError": "Unbekannter Fehler",
     "researchGoalAttached": "Forschungsziel zugeordnet",
     "failedToStartGoal": "Ziel konnte nicht gestartet werden.",
     "researchGoalCancelled": "Forschungsziel abgebrochen",
@@ -579,7 +590,18 @@
     "resumeConnector": "Connector fortsetzen",
     "resumeConnectorTitle": "Kill-Switch löschen und Connector-Aktivität wieder aktivieren",
     "connectorResumed": "Connector fortgesetzt",
-    "failedToResumeConnector": "Connector konnte nicht fortgesetzt werden."
+    "failedToResumeConnector": "Connector konnte nicht fortgesetzt werden.",
+    "export": {
+      "title": "Chat-Export",
+      "time": "Exportzeit",
+      "user": "Benutzer",
+      "assistant": "Assistent",
+      "error": "Fehler",
+      "toolCall": "Tool-Aufruf",
+      "swarmStatus": "Swarm-Status",
+      "backtestComplete": "Backtest abgeschlossen",
+      "unknown": "unbekannt"
+    }
   },
   "runDetail": {
     "title": "Durchlauf-Details",

@@ -56,8 +56,8 @@ export function OptionsPayoffChart({ curve, entrySpot, breakevens, height = 340 
       },
       toolbox: {
         feature: {
-          saveAsImage: { title: "Save" },
-          restore: { title: "Reset" },
+          saveAsImage: { title: i18n.t("charts.toolboxSave") },
+          restore: { title: i18n.t("charts.toolboxReset") },
         },
         right: 8,
         top: 0,

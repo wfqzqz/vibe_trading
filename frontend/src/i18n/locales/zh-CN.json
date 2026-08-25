@@ -514,6 +514,8 @@
     "checkConnector": "检查连接器",
     "analyzePortfolio": "分析连接器投资组合",
     "executionTimedOut": "执行超时，已自动停止",
+    "executionFailed": "执行失败",
+    "unknownError": "未知错误",
     "researchGoalAttached": "研究目标已附加",
     "failedToStartGoal": "启动目标失败。",
     "researchGoalCancelled": "研究目标已取消",
@@ -574,7 +576,18 @@
     "resumeConnector": "恢复连接器",
     "resumeConnectorTitle": "清除熔断开关并恢复连接器活动",
     "connectorResumed": "连接器已恢复",
-    "failedToResumeConnector": "恢复连接器失败。"
+    "failedToResumeConnector": "恢复连接器失败。",
+    "export": {
+      "title": "会话导出",
+      "time": "导出时间",
+      "user": "用户",
+      "assistant": "智能体",
+      "error": "错误",
+      "toolCall": "工具调用",
+      "swarmStatus": "智能体团队状态",
+      "backtestComplete": "回测完成",
+      "unknown": "未知"
+    }
   },
   "runDetail": {
     "title": "运行详情",
@@ -943,7 +956,7 @@
     "scoreZoo": "在标的池上评分整个因子库",
     "scoreDesc": "对所选因子库中每个 Alpha 在指定标的池和时间段上计算 IC / IR，然后将它们分为存活 / 反转 / 失效。",
     "period": "时间段",
-    "top": "Top",
+    "top": "前 N 名",
     "running": "运行中…",
     "submitting": "提交中…",
     "computing": "计算中：{{id}}",
@@ -1225,7 +1238,16 @@
   "charts": {
     "noPriceData": "这个标的还没有价格数据",
     "noCorrelationData": "至少选两个标的才能比较",
-    "noEquityData": "还没有净值曲线——先跑一次回测"
+    "noEquityData": "还没有净值曲线——先跑一次回测",
+    "toolboxSave": "保存",
+    "toolboxReset": "重置",
+    "toolboxZoom": "缩放",
+    "toolboxBack": "还原",
+    "seriesEquity": "净值",
+    "seriesDrawdown": "回撤",
+    "seriesCorrelation": "相关性",
+    "seriesVolume": "成交量",
+    "maxDrawdownLabel": "最大回撤：{{value}}%"
   },
   "toolProgress": {
     "step": "步骤 {{step}} · {{tool}}",

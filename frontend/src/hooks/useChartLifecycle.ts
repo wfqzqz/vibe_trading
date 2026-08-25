@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import type { EChartsCoreOption } from "echarts/core";
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { useThemeDark } from "@/lib/theme-store";
@@ -21,6 +22,7 @@ export function useChartLifecycle(
   deps: readonly unknown[],
 ): void {
   const dark = useThemeDark();
+  const { i18n } = useTranslation();
   useEffect(() => {
     if (!ref.current) return;
     const chart = echarts.init(ref.current);
@@ -43,5 +45,5 @@ export function useChartLifecycle(
       chart.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, dark]);
+  }, [...deps, dark, i18n.language]);
 }

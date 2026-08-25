@@ -5,7 +5,16 @@
   "charts": {
     "noPriceData": "No price data for this symbol yet",
     "noCorrelationData": "Pick at least two symbols to compare",
-    "noEquityData": "No account-value curve yet — run a backtest first"
+    "noEquityData": "No account-value curve yet — run a backtest first",
+    "toolboxSave": "Save",
+    "toolboxReset": "Reset",
+    "toolboxZoom": "Zoom",
+    "toolboxBack": "Back",
+    "seriesEquity": "Equity",
+    "seriesDrawdown": "Drawdown",
+    "seriesCorrelation": "Correlation",
+    "seriesVolume": "Volume",
+    "maxDrawdownLabel": "Max DD: {{value}}%"
   },
   "layout": {
     "home": "Home",
@@ -519,6 +528,8 @@
     "checkConnector": "Check connector",
     "analyzePortfolio": "Analyze connector portfolio",
     "executionTimedOut": "Execution timed out, automatically stopped",
+    "executionFailed": "Execution failed",
+    "unknownError": "Unknown error",
     "researchGoalAttached": "Research goal attached",
     "failedToStartGoal": "Failed to start goal.",
     "researchGoalCancelled": "Research goal cancelled",
@@ -579,7 +590,18 @@
     "resumeConnector": "Resume connector",
     "resumeConnectorTitle": "Clear the kill switch and re-enable connector activity",
     "connectorResumed": "Connector resumed",
-    "failedToResumeConnector": "Failed to resume connector."
+    "failedToResumeConnector": "Failed to resume connector.",
+    "export": {
+      "title": "Chat Export",
+      "time": "Export time",
+      "user": "User",
+      "assistant": "Assistant",
+      "error": "Error",
+      "toolCall": "Tool call",
+      "swarmStatus": "Swarm status",
+      "backtestComplete": "Backtest complete",
+      "unknown": "unknown"
+    }
   },
   "runDetail": {
     "title": "Run Detail",
