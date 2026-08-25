@@ -1,0 +1,152 @@
+name: Upstream drift check
+
+# DORA-124 §六 item 6 — weekly comparison of upstream/main vs main diff
+# surface. Alerts (opens a `upstream-drift` issue) when the fork falls too far
+# behind upstream or when a merge-tree dry run shows real conflicts, and always
+# attaches a conflict pre-evaluation (files changed on both sides since the
+# fork point). Policy and thresholds: UPSTREAM-SYNC.md.
+
+on:
+  schedule:
+    # Monday 03:00 UTC.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      commits_threshold:
+        description: "Alert when commits-behind >= this (default 100)"
+        required: false
+        default: "100"
+      conflict_threshold:
+        description: "Alert when merge-tree conflicts >= this (default 1)"
+        required: false
+        default: "1"
+
+permissions:
+  contents: read # checkout + fetch upstream
+  issues: write  # open the drift alert issue
+
+env:
+  UPSTREAM_URL: https://github.com/HKUDS/Vibe-Trading.git
+  FORK_POINT: 67e562a2f85080bcd5416f751061acba1885e57c # v0.1.14
+  COMMITS_THRESHOLD: ${{ github.event.inputs.commits_threshold || '100' }}
+  CONFLICT_THRESHOLD: ${{ github.event.inputs.conflict_threshold || '1' }}
+
+jobs:
+  drift:
+    name: drift / upstream-main vs main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # actions/checkout v7.0.1 (SHA-pinned, matching test.yml). Full history
+      # is required to compute the fork-point merge-base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_URL" || true
+          git fetch upstream '+refs/heads/*:refs/remotes/upstream/*'
+
+      - name: Compute drift and conflict pre-evaluation
+        id: drift
+        run: |
+          set -euo pipefail
+
+          base="$(git merge-base main upstream/main)"
+          commits_behind="$(git rev-list --count main..upstream/main)"
+          commits_ahead="$(git rev-list --count upstream/main..main)"
+          upstream_files="$(git diff --name-only "$base" upstream/main | wc -l | tr -d ' ')"
+          upstream_head="$(git rev-parse --short upstream/main)"
+
+          # Conflict surface: files changed on BOTH sides since the fork point.
+          git diff --name-only "$base" main | sort > /tmp/ours.txt
+          git diff --name-only "$base" upstream/main | sort > /tmp/theirs.txt
+          comm -12 /tmp/ours.txt /tmp/theirs.txt > /tmp/conflict-surface.txt
+          conflict_count="$(wc -l < /tmp/conflict-surface.txt | tr -d ' ')"
+
+          # Real merge conflicts via merge-tree (git >= 2.40 on ubuntu-latest).
+          merge_conflicts=""
+          if git merge-tree --write-tree --name-only main upstream/main >/tmp/mt.txt 2>/dev/null; then
+            merge_conflicts="$(tail -n +2 /tmp/mt.txt)"
+          fi
+          merge_conflict_count="$(printf '%s\n' "$merge_conflicts" | grep -c . || true)"
+
+          alert="false"
+          if (( commits_behind >= COMMITS_THRESHOLD )); then
+            alert="true"
+          fi
+          if (( merge_conflict_count >= CONFLICT_THRESHOLD )); then
+            alert="true"
+          fi
+
+          # Persist for later steps / summary.
+          {
+            echo "commits_behind=$commits_behind"
+            echo "upstream_files=$upstream_files"
+            echo "conflict_count=$conflict_count"
+            echo "merge_conflict_count=$merge_conflict_count"
+            echo "alert=$alert"
+          } >> "$GITHUB_OUTPUT"
+
+          # Human-readable report.
+          {
+            echo "# Upstream drift — $(date -u +%F)"
+            echo ""
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| fork point | \`$FORK_POINT\` (v0.1.14) |"
+            echo "| merge base | \`$(git rev-parse --short "$base")\` |"
+            echo "| upstream/main | \`$upstream_head\` |"
+            echo "| commits behind upstream | **$commits_behind** (threshold $COMMITS_THRESHOLD) |"
+            echo "| commits ahead (ours-only) | $commits_ahead |"
+            echo "| upstream changed files | $upstream_files |"
+            echo "| conflict surface | $conflict_count file(s) |"
+            echo "| merge-tree conflicts | **$merge_conflict_count** (threshold $CONFLICT_THRESHOLD) |"
+            echo ""
+            echo "## Conflict pre-evaluation"
+            echo ""
+            if (( conflict_count > 0 )); then
+              echo "Files changed on both our fork and upstream since the fork point:"
+              echo '```'
+              cat /tmp/conflict-surface.txt
+              echo '```'
+            else
+              echo "No file is changed on both sides — no text-conflict risk."
+            fi
+            if [[ -n "$merge_conflicts" ]]; then
+              echo ""
+              echo "Files that actually conflict in a merge-tree dry run:"
+              echo '```'
+              printf '%s\n' "$merge_conflicts"
+              echo '```'
+            fi
+            echo ""
+            echo "Thresholds: \`commits_behind >= $COMMITS_THRESHOLD\` or \`merge-tree conflicts >= $CONFLICT_THRESHOLD\` → alert."
+            echo ""
+            echo "Resolve: \`scripts/upstream-sync sync\` (see UPSTREAM-SYNC.md)."
+          } | tee drift-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open drift alert issue
+        if: steps.drift.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create upstream-drift --color e99695 \
+            --description "fork 落后上游或存在真实 merge 冲突，需同步" 2>/dev/null || true
+
+          TITLE="Upstream drift alert — $(date -u +%F) (${{ steps.drift.outputs.commits_behind }} behind, ${{ steps.drift.outputs.merge_conflict_count }} merge conflict(s))"
+          existing="$(gh issue list --search "Upstream drift alert in:title state:open" --json number --jq '.[0].number' 2>/dev/null || true)"
+
+          if [[ -z "$existing" ]]; then
+            gh issue create \
+              --title "$TITLE" \
+              --label upstream-drift \
+              --body-file drift-report.md
+            echo "created drift alert issue"
+          else
+            gh issue comment "$existing" --body-file drift-report.md
+            echo "updated existing drift alert issue #$existing"
+          fi
