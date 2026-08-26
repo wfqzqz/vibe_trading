@@ -15,9 +15,13 @@
 | --- | --- |
 | 上游仓库 | `https://github.com/HKUDS/Vibe-Trading.git` |
 | fork 仓库 | `https://github.com/wfqzqz/vibe_trading.git` |
-| fork 基线 tag | `v0.1.14` |
+| fork 基线位置 | v0.1.14 之后（最近 release 为 v0.1.14） |
 | fork 基线 commit | `67e562a2f85080bcd5416f751061acba1885e57c` |
 | fork 基线提交信息 | `docs(readme): mirror #1180's Docker data-survival sentence in README_es`（2026-08-23 01:27 +0800） |
+
+> 注：fork 基线**不是** tag `v0.1.14` 本身（`v0.1.14` 为 annotated tag，`v0.1.14^{commit}` = `7329cb09`，
+> fork 基线 `67e562a2` 在其后 110 commits）。fork 基线是 v0.1.14 **之后**的提交 `67e562a2`，v0.1.14 仅作为
+> 「最近 release」参照。
 
 同步以「上游 tag/release + 迁移说明」为单位，**不逐 commit 盲追**。每次同步的起点是上一个
 已合流的同步点（当前为 `67e562a2`），终点是上游的最新 tag 或 `upstream/main` 的某个经评审
@@ -83,7 +87,7 @@ DORA-124 §四 为准，变更须回写 DORA-124。
 ```text
 sync(upstream): merge HKUDS/Vibe-Trading <tag-or-commit> (upstream-YYYYMM)
 
-上游区间: v0.1.14 (67e562a2) .. <本次合入的上游 commit>
+上游区间: 67e562a2（v0.1.14 之后）.. <本次合入的上游 commit>
 上游提交: N 个 (git rev-list --count <base>..upstream/main)
 
 迁移说明:
@@ -143,7 +147,7 @@ sync(upstream): merge HKUDS/Vibe-Trading <tag-or-commit> (upstream-YYYYMM)
 
 | 项 | 值 |
 | --- | --- |
-| 上游区间 | `v0.1.14 (67e562a2)` → `upstream/main @ 99e84aba`（`chore(mcp): drop the fetch_market_data_json import #1185 orphaned`） |
+| 上游区间 | `67e562a2（v0.1.14 之后）` → `upstream/main @ 99e84aba`（`chore(mcp): drop the fetch_market_data_json import #1185 orphaned`） |
 | 上游提交数 | 23（`git rev-list --count 67e562a2..upstream/main`） |
 | 冲突面 | 双方同时改动仅 `README.md`（`git merge-tree --write-tree` 无文本冲突） |
 | 锁文件 | 上游未改 `agent/requirements*.txt` / `pyproject.toml` → 无变化（重生成步骤为 no-op） |

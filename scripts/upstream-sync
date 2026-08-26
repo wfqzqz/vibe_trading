@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 UPSTREAM_URL="https://github.com/HKUDS/Vibe-Trading.git"
-FORK_POINT="67e562a2f85080bcd5416f751061acba1885e57c" # v0.1.14
+FORK_POINT="67e562a2f85080bcd5416f751061acba1885e57c" # v0.1.14 之后
 UPSTREAM_BRANCH="upstream/main"
 
 usage() {
@@ -28,7 +28,7 @@ Commands:
 
 Environment:
   UPSTREAM_URL          Upstream remote URL (default HKUDS/Vibe-Trading)
-  FORK_POINT            Fork baseline commit (default v0.1.14 = $FORK_POINT)
+  FORK_POINT            Fork baseline commit (default v0.1.14 之后 = $FORK_POINT)
 USAGE
 }
 
