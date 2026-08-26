@@ -20,7 +20,7 @@
 | fork 基线提交信息 | `docs(readme): mirror #1180's Docker data-survival sentence in README_es`（2026-08-23 01:27 +0800） |
 
 > 注：fork 基线**不是** tag `v0.1.14` 本身（`v0.1.14` 为 annotated tag，`v0.1.14^{commit}` = `7329cb09`，
-> 在 fork 基线之后 110 commits）。fork 基线是 v0.1.14 **之后**的提交 `67e562a2`，v0.1.14 仅作为
+> fork 基线 `67e562a2` 在其后 110 commits）。fork 基线是 v0.1.14 **之后**的提交 `67e562a2`，v0.1.14 仅作为
 > 「最近 release」参照。
 
 同步以「上游 tag/release + 迁移说明」为单位，**不逐 commit 盲追**。每次同步的起点是上一个
